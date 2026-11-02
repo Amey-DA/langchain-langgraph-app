@@ -1,0 +1,13 @@
+{
+  "logical_relationships": [
+    {
+      "relationship_type": "logical",
+      "from_table": "dbo.DM_RETAILER_SITE",
+      "from_column": "RETAILER_SITE_COUNTRY_CODE",
+      "to_table": "dbo.DM_COUNTRY",
+      "to_column": "COUNTRY_CODE",
+      "verification_status": "verified_by_data",
+      "description": "Connects a retailer site to its country using the country code."
+    }
+  ]
+}

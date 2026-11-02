@@ -1,0 +1,1076 @@
+/* =========================================
+   GLOBAL
+========================================= */
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    width: 100%;
+    height: 100%;
+
+    margin: 0;
+
+    overflow: hidden;
+
+    font-family: Arial, Helvetica, sans-serif;
+
+    background: #ffffff;
+
+    color: #202124;
+}
+
+
+/* =========================================
+   APP CONTAINER
+========================================= */
+
+.app-container {
+    width: 100%;
+    height: 100vh;
+
+    display: flex;
+
+    overflow: hidden;
+}
+
+
+/* =========================================
+   LEFT SIDEBAR
+========================================= */
+
+.sidebar {
+    width: 48%;
+
+    min-width: 500px;
+
+    height: 100vh;
+
+    border-right: 1px solid #e5e7eb;
+
+    padding: 28px;
+
+    overflow-y: auto;
+
+    background: #ffffff;
+}
+
+
+/* =========================================
+   SIDEBAR HEADER
+========================================= */
+
+.sidebar-header h2 {
+    margin: 0 0 22px 0;
+
+    font-size: 18px;
+
+    font-weight: 600;
+}
+
+
+/* =========================================
+   UPLOAD BOX
+========================================= */
+
+.upload-box {
+    height: 145px;
+
+    border: 1.5px dashed #d1d5db;
+
+    border-radius: 10px;
+
+    display: flex;
+
+    flex-direction: column;
+
+    align-items: center;
+
+    justify-content: center;
+
+    cursor: pointer;
+
+    transition: 0.2s;
+}
+
+.upload-box:hover {
+    background: #f8fafc;
+
+    border-color: #9ca3af;
+}
+
+
+/* =========================================
+   UPLOAD ICON
+========================================= */
+
+.upload-icon {
+    width: 35px;
+    height: 35px;
+
+    border-radius: 50%;
+
+    display: flex;
+
+    align-items: center;
+    justify-content: center;
+
+    color: #9ca3af;
+
+    background: #f5f5f5;
+
+    font-size: 20px;
+
+    margin-bottom: 10px;
+}
+
+
+/* =========================================
+   UPLOAD TEXT
+========================================= */
+
+.upload-title {
+    font-size: 13px;
+
+    font-weight: 500;
+}
+
+.upload-subtitle {
+    margin-top: 5px;
+
+    font-size: 11px;
+
+    color: #888;
+}
+
+
+/* =========================================
+   UPLOAD BUTTON
+========================================= */
+
+.upload-button {
+    width: 100%;
+
+    margin-top: 12px;
+
+    padding: 10px;
+
+    border: none;
+
+    border-radius: 7px;
+
+    background: #222;
+
+    color: white;
+
+    cursor: pointer;
+
+    font-size: 13px;
+}
+
+.upload-button:hover {
+    background: #000;
+}
+
+
+/* =========================================
+   BREADCRUMB
+========================================= */
+
+.breadcrumb {
+    display: flex;
+
+    gap: 8px;
+
+    margin-top: 30px;
+
+    font-size: 12px;
+
+    color: #777;
+}
+
+.breadcrumb strong {
+    color: #333;
+}
+
+
+/* =========================================
+   KNOWLEDGE HEADER
+========================================= */
+
+.knowledge-header {
+    display: flex;
+
+    align-items: center;
+
+    justify-content: space-between;
+
+    margin-top: 20px;
+
+    margin-bottom: 18px;
+}
+
+.file-title {
+    font-size: 14px;
+
+    font-weight: 600;
+}
+
+
+/* =========================================
+   ADD BUTTON
+========================================= */
+
+.add-button {
+    border: none;
+
+    background: #222;
+
+    color: white;
+
+    border-radius: 6px;
+
+    padding: 8px 13px;
+
+    cursor: pointer;
+
+    font-size: 12px;
+}
+
+
+/* =========================================
+   FILE TABLE
+========================================= */
+
+.file-table-header {
+    display: grid;
+
+    grid-template-columns: 1fr 90px 70px;
+
+    padding: 8px 10px;
+
+    color: #888;
+
+    font-size: 10px;
+
+    font-weight: 600;
+
+    border-bottom: 1px solid #eee;
+}
+
+.file-row {
+    display: grid;
+
+    grid-template-columns: 1fr 90px 70px;
+
+    align-items: center;
+
+    padding: 13px 10px;
+
+    border-bottom: 1px solid #f0f0f0;
+
+    font-size: 12px;
+}
+
+
+/* =========================================
+   FILE NAME
+========================================= */
+
+.file-name {
+    display: flex;
+
+    align-items: center;
+
+    gap: 8px;
+
+    overflow: hidden;
+}
+
+.file-name span:last-child {
+    white-space: nowrap;
+
+    overflow: hidden;
+
+    text-overflow: ellipsis;
+}
+
+.file-icon {
+    font-size: 15px;
+}
+
+.file-size {
+    color: #777;
+}
+
+
+/* =========================================
+   STATUS
+========================================= */
+
+.status {
+    width: fit-content;
+
+    padding: 4px 8px;
+
+    border-radius: 20px;
+
+    font-size: 10px;
+}
+
+.indexed {
+    background: #dcfce7;
+
+    color: #15803d;
+}
+
+.processing {
+    background: #fef3c7;
+
+    color: #b45309;
+}
+
+
+/* =========================================
+   RIGHT CHAT PANEL
+========================================= */
+
+.chat-panel {
+    flex: 1;
+
+    width: 52%;
+
+    height: 100vh;
+
+    min-width: 0;
+
+    display: flex;
+
+    flex-direction: column;
+
+    background: #fafafa;
+
+    overflow: hidden;
+}
+
+
+/* =========================================
+   CHAT HEADER
+========================================= */
+
+.chat-header {
+    flex: 0 0 auto;
+
+    height: 68px;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: space-between;
+
+    padding: 0 22px;
+
+    border-bottom: 1px solid #e5e7eb;
+
+    background: white;
+}
+
+.assistant-info {
+    display: flex;
+
+    align-items: center;
+
+    gap: 10px;
+}
+
+.assistant-icon {
+    width: 34px;
+    height: 34px;
+
+    border-radius: 50%;
+
+    display: flex;
+
+    align-items: center;
+    justify-content: center;
+
+    background: #222;
+
+    color: white;
+
+    font-size: 17px;
+}
+
+.assistant-name {
+    font-size: 14px;
+
+    font-weight: 600;
+}
+
+.assistant-status {
+    margin-top: 3px;
+
+    font-size: 10px;
+
+    color: #16a34a;
+}
+
+.new-chat {
+    border: none;
+
+    background: transparent;
+
+    font-size: 22px;
+
+    color: #555;
+
+    cursor: pointer;
+}
+
+
+/* =========================================
+   CHAT MESSAGES
+========================================= */
+
+.chat-messages {
+    flex: 1 1 auto;
+
+    min-height: 0;
+
+    padding: 25px;
+
+    overflow-y: auto;
+
+    display: flex;
+
+    flex-direction: column;
+
+    justify-content: flex-start;
+
+    align-items: stretch;
+}
+
+
+/* =========================================
+   MESSAGE
+========================================= */
+
+.message {
+    display: flex;
+
+    width: 100%;
+
+    height: auto;
+
+    min-height: 0;
+
+    flex: 0 0 auto;
+
+    margin: 0 0 20px 0;
+
+    padding: 0;
+}
+
+
+/* =========================================
+   ASSISTANT MESSAGE
+========================================= */
+
+.assistant-message {
+    display: flex;
+
+    flex-direction: row;
+
+    align-items: flex-start;
+
+    justify-content: flex-start;
+
+    gap: 10px;
+
+    width: 100%;
+
+    height: auto;
+
+    min-height: 0;
+
+    flex: 0 0 auto;
+
+    margin: 0 0 18px 0;
+
+    padding: 0;
+}
+
+
+/* =========================================
+   MESSAGE ICON
+========================================= */
+
+.message-icon {
+    width: 27px;
+    height: 27px;
+
+    flex: 0 0 27px;
+
+    border-radius: 50%;
+
+    background: #222;
+
+    color: white;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    font-size: 13px;
+}
+
+
+/* =========================================
+   AI MESSAGE CONTENT
+========================================= */
+
+.message-content {
+    box-sizing: border-box;
+
+    width: fit-content;
+
+    max-width: 75%;
+
+    height: auto;
+
+    min-height: 0;
+
+    margin: 0;
+
+    padding: 12px 15px;
+
+    background: white;
+
+    border: 1px solid #e5e7eb;
+
+    border-radius: 10px;
+
+    font-size: 13px;
+
+    line-height: 1.5;
+
+    display: block;
+
+    flex: 0 0 auto;
+
+    align-self: flex-start;
+
+    overflow: visible;
+}
+
+
+/* =========================================
+   AI ANSWER TEXT
+========================================= */
+
+.message-content p {
+    display: block;
+
+    width: auto;
+
+    height: auto;
+
+    min-height: 0;
+
+    margin: 0;
+
+    padding: 0;
+
+    text-align: left;
+
+    white-space: pre-wrap;
+}
+
+
+/* =========================================
+   USER MESSAGE
+========================================= */
+
+.user-message {
+    display: flex;
+
+    justify-content: flex-end;
+
+    align-items: flex-start;
+
+    width: 100%;
+
+    height: auto;
+
+    min-height: 0;
+
+    margin: 0 0 18px 0;
+
+    padding: 0;
+}
+
+.user-bubble {
+    width: fit-content;
+
+    max-width: 65%;
+
+    height: auto;
+
+    min-height: 0;
+
+    background: #333;
+
+    color: white;
+
+    padding: 10px 14px;
+
+    border-radius: 10px;
+
+    font-size: 13px;
+
+    line-height: 1.5;
+}
+
+
+/* =========================================
+   SOURCE BOX
+========================================= */
+
+.source-box {
+    display: block;
+
+    width: 100%;
+
+    height: auto;
+
+    min-height: 0;
+
+    margin: 12px 0 0 0;
+
+    padding: 10px 0 0 0;
+
+    border-top: 1px solid #eee;
+
+    font-size: 11px;
+
+    color: #777;
+}
+
+.source-label {
+    display: block;
+
+    font-weight: 600;
+
+    margin-bottom: 7px;
+
+    color: #555;
+}
+
+.source-box div {
+    margin-top: 5px;
+
+    line-height: 1.5;
+}
+
+
+/* =========================================
+   DOCUMENT REFERENCE
+========================================= */
+
+.document-reference {
+    margin-top: 10px;
+
+    padding: 6px 9px;
+
+    background: #f3f4f6;
+
+    border-radius: 5px;
+
+    font-size: 11px;
+
+    color: #555;
+}
+
+
+/* =========================================
+   QUESTION INPUT AREA
+========================================= */
+
+.question-area {
+    flex: 0 0 auto;
+
+    width: 100%;
+
+    padding: 12px 20px 15px;
+
+    background: white;
+
+    border-top: 1px solid #e5e7eb;
+
+    z-index: 10;
+}
+
+
+/* =========================================
+   QUESTION FORM
+========================================= */
+
+.question-form {
+    width: 100%;
+
+    display: flex;
+
+    align-items: center;
+
+    border: 1px solid #d1d5db;
+
+    border-radius: 10px;
+
+    background: white;
+
+    overflow: hidden;
+}
+
+
+/* =========================================
+   QUESTION INPUT
+========================================= */
+
+.question-form input {
+    flex: 1;
+
+    min-width: 0;
+
+    height: 48px;
+
+    border: none;
+
+    outline: none;
+
+    padding: 0 15px;
+
+    font-size: 13px;
+
+    background: transparent;
+}
+
+.question-form input:disabled {
+    background: #f5f5f5;
+
+    cursor: not-allowed;
+}
+
+
+/* =========================================
+   SEND BUTTON
+========================================= */
+
+.question-form button {
+    width: 50px;
+
+    height: 48px;
+
+    border: none;
+
+    background: transparent;
+
+    color: #333;
+
+    font-size: 18px;
+
+    cursor: pointer;
+}
+
+.question-form button:hover {
+    color: #000;
+}
+
+.question-form button:disabled {
+    opacity: 0.5;
+
+    cursor: not-allowed;
+}
+
+
+/* =========================================
+   DISCLAIMER
+========================================= */
+
+.disclaimer {
+    text-align: center;
+
+    margin-top: 6px;
+
+    font-size: 9px;
+
+    color: #999;
+}
+
+
+/* =========================================
+   EMPTY CHAT
+========================================= */
+
+.empty-chat {
+    flex: 1;
+
+    display: flex;
+
+    flex-direction: column;
+
+    align-items: center;
+
+    justify-content: center;
+
+    text-align: center;
+
+    color: #777;
+
+    padding: 20px;
+}
+
+.empty-chat-icon {
+    width: 45px;
+    height: 45px;
+
+    border-radius: 50%;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    background: #222;
+
+    color: white;
+
+    font-size: 20px;
+
+    margin-bottom: 15px;
+}
+
+.empty-chat h3 {
+    margin: 0 0 8px;
+
+    color: #333;
+
+    font-size: 15px;
+}
+
+.empty-chat p {
+    margin: 0;
+
+    max-width: 350px;
+
+    font-size: 12px;
+
+    line-height: 1.5;
+}
+
+
+/* =========================================
+   THINKING INDICATOR
+========================================= */
+
+.thinking-content {
+    display: flex;
+
+    align-items: center;
+
+    gap: 4px;
+
+    min-width: 90px;
+}
+
+.thinking-text {
+    color: #555;
+}
+
+.thinking-dots span {
+    animation: thinking 1.4s infinite;
+}
+
+.thinking-dots span:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.thinking-dots span:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes thinking {
+
+    0% {
+        opacity: 0.2;
+    }
+
+    50% {
+        opacity: 1;
+    }
+
+    100% {
+        opacity: 0.2;
+    }
+
+}
+
+
+/* =========================================
+   SELECTED FILE PREVIEW
+========================================= */
+
+.selected-file {
+    display: flex;
+
+    align-items: center;
+
+    gap: 10px;
+
+    margin-top: 10px;
+
+    padding: 10px 12px;
+
+    border: 1px solid #e5e7eb;
+
+    border-radius: 8px;
+
+    background: #fafafa;
+}
+
+.selected-file-icon {
+    font-size: 18px;
+}
+
+.selected-file-info {
+    flex: 1;
+
+    min-width: 0;
+}
+
+.selected-file-name {
+    font-size: 12px;
+
+    font-weight: 600;
+
+    color: #333;
+
+    white-space: nowrap;
+
+    overflow: hidden;
+
+    text-overflow: ellipsis;
+}
+
+.selected-file-size {
+    margin-top: 3px;
+
+    font-size: 10px;
+
+    color: #888;
+}
+
+.remove-file {
+    border: none;
+
+    background: transparent;
+
+    color: #888;
+
+    font-size: 20px;
+
+    cursor: pointer;
+
+    padding: 0 5px;
+}
+
+.remove-file:hover {
+    color: #222;
+}
+
+
+/* =========================================
+   EMPTY STATE
+========================================= */
+
+.empty-state {
+    padding: 25px 10px;
+
+    text-align: center;
+
+    color: #999;
+
+    font-size: 12px;
+}
+
+
+/* =========================================
+   RESPONSIVE
+========================================= */
+
+@media (max-width: 900px) {
+
+    .app-container {
+        flex-direction: column;
+
+        height: auto;
+    }
+
+    .sidebar {
+        width: 100%;
+
+        min-width: 0;
+
+        height: auto;
+
+        border-right: none;
+
+        border-bottom: 1px solid #ddd;
+    }
+
+    .chat-panel {
+        width: 100%;
+
+        height: 600px;
+
+        min-height: 600px;
+    }
+}
+
+/* =========================================
+   DOCUMENT STATUS UPDATES
+========================================= */
+
+.status-badge {
+    display: inline-block;
+    width: fit-content;
+}
+
+
+/* Processing */
+
+.status-processing {
+    background: #fef3c7;
+    color: #b45309;
+}
+
+
+/* Indexed */
+
+.status-indexed {
+    background: #dcfce7;
+    color: #15803d;
+}
+
+
+/* Failed */
+
+.status-failed {
+    background: #fee2e2;
+    color: #b91c1c;
+}

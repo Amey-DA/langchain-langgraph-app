@@ -1,0 +1,1069 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
+
+    <title>Document Q&A - RAG</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='style.css') }}">
+
+</head>
+
+
+<body>
+
+<div class="app-container">
+
+
+    <!-- =====================================================
+         LEFT PANEL
+    ====================================================== -->
+
+    <aside class="sidebar">
+
+
+        <!-- Header -->
+
+        <div class="sidebar-header">
+
+            <h2>
+                Upload Knowledge
+            </h2>
+
+        </div>
+
+
+        <!-- Upload Form -->
+
+        <form
+            method="POST"
+            action="/upload"
+            enctype="multipart/form-data"
+            id="uploadForm"
+        >
+
+
+            <!-- Upload Box -->
+
+            <label
+                for="document"
+                class="upload-box"
+            >
+
+                <div class="upload-icon">
+                    ↑
+                </div>
+
+
+                <div class="upload-title">
+                    Click to upload or drag and drop
+                </div>
+
+
+                <div class="upload-subtitle">
+                    PDF (max. 10MB)
+                </div>
+
+
+                <input
+                    type="file"
+                    id="document"
+                    name="document"
+                    accept=".pdf"
+                    hidden
+                    required
+                >
+
+            </label>
+
+
+            <!-- Selected File -->
+
+            <div
+                id="selectedFile"
+                class="selected-file"
+                style="display: none;"
+            >
+
+                <div class="selected-file-icon">
+                    📄
+                </div>
+
+
+                <div class="selected-file-info">
+
+                    <div
+                        id="selectedFileName"
+                        class="selected-file-name"
+                    ></div>
+
+
+                    <div
+                        id="selectedFileSize"
+                        class="selected-file-size"
+                    ></div>
+
+                </div>
+
+
+                <button
+                    type="button"
+                    id="removeFile"
+                    class="remove-file"
+                    title="Remove file"
+                >
+                    ×
+                </button>
+
+            </div>
+
+
+            <!-- Upload Button -->
+
+            <button
+                type="submit"
+                class="upload-button"
+            >
+                Upload Document
+            </button>
+
+        </form>
+
+
+        <!-- Breadcrumb -->
+
+        <div class="breadcrumb">
+
+            <span>
+                Home
+            </span>
+
+            <span>
+                ›
+            </span>
+
+            <strong>
+                Knowledge Base
+            </strong>
+
+        </div>
+
+
+        <!-- Knowledge Base -->
+
+        <div class="knowledge-header">
+
+            <span class="file-title">
+                Knowledge Base
+            </span>
+
+
+            <button
+                type="button"
+                class="add-button"
+                onclick="document.getElementById('document').click()"
+            >
+                + Add New
+            </button>
+
+        </div>
+
+
+        <!-- Table Header -->
+
+        <div class="file-table-header">
+
+            <span>
+                FILE NAME
+            </span>
+
+            <span>
+                STATUS
+            </span>
+
+            <span>
+                SIZE
+            </span>
+
+        </div>
+
+
+        <!-- File List -->
+
+        <div class="file-list">
+
+            {% if files %}
+
+                {% for file in files %}
+
+                    <div class="file-row">
+
+                        <div class="file-name">
+
+                            <span class="file-icon">
+                                📄
+                            </span>
+
+                            <span>
+                                {{ file.name }}
+                            </span>
+
+                        </div>
+
+
+                        <span
+                            class="status
+                            {% if file.status == 'Indexed' %}
+                                indexed
+                            {% else %}
+                                processing
+                            {% endif %}"
+                        >
+                            {{ file.status }}
+                        </span>
+
+
+                        <span class="file-size">
+                            {{ file.size }}
+                        </span>
+
+                    </div>
+
+                {% endfor %}
+
+            {% else %}
+
+                <div class="empty-state">
+                    No documents uploaded yet.
+                </div>
+
+            {% endif %}
+
+        </div>
+
+    </aside>
+
+
+    <!-- =====================================================
+         RIGHT CHAT PANEL
+    ====================================================== -->
+
+    <main class="chat-panel">
+
+
+        <!-- Chat Header -->
+
+        <header class="chat-header">
+
+            <div class="assistant-info">
+
+                <div class="assistant-icon">
+                    ✦
+                </div>
+
+
+                <div>
+
+                    <div class="assistant-name">
+                        AI Assistant
+                    </div>
+
+
+                    <div class="assistant-status">
+                        ● RAG Active
+                    </div>
+
+                </div>
+
+            </div>
+
+
+            <button
+                type="button"
+                class="new-chat"
+                title="New Chat"
+                id="newChatButton"
+            >
+                +
+            </button>
+
+        </header>
+
+
+        <!-- =================================================
+             CHAT MESSAGES
+        ================================================== -->
+
+        <section
+            class="chat-messages"
+            id="chatMessages"
+        >
+
+
+            {% if question %}
+
+
+                <!-- User Question -->
+
+                <div class="message user-message">
+
+                    <div class="user-bubble">
+                        {{ question }}
+                    </div>
+
+                </div>
+
+
+                <!-- Assistant Answer -->
+
+                <div class="message assistant-message">
+
+                    <div class="message-icon">
+                        ✦
+                    </div>
+
+
+                    <div class="message-content">
+
+                        {# FIX: <p> and the answer must be on ONE line, because
+                           .message-content p uses white-space: pre-wrap, which
+                           would show the indentation and line breaks as blank space #}
+                        <p>{{ answer | trim }}</p>
+
+
+                        {% if sources %}
+
+                            <div class="source-box">
+
+                                <span class="source-label">
+                                    Sources
+                                </span>
+
+
+                                {% for source in sources %}
+
+                                    <div>
+                                        📄
+                                        {{ source.source }}
+                                        · Page
+                                        {{ source.page }}
+                                    </div>
+
+                                {% endfor %}
+
+                            </div>
+
+                        {% endif %}
+
+                    </div>
+
+                </div>
+
+
+            {% else %}
+
+
+                <!-- Initial Empty State -->
+
+                <div class="empty-chat">
+
+                    <div class="empty-chat-icon">
+                        ✦
+                    </div>
+
+
+                    <h3>
+                        Upload a document to get started
+                    </h3>
+
+
+                    <p>
+                        Upload a PDF from the left panel and ask
+                        questions about its content.
+                    </p>
+
+                </div>
+
+
+            {% endif %}
+
+        </section>
+
+
+        <!-- =================================================
+             QUESTION BOX
+        ================================================== -->
+
+        <div class="question-area">
+
+            <form
+                id="questionForm"
+                class="question-form"
+            >
+
+                <input
+                    type="text"
+                    id="questionInput"
+                    name="question"
+                    placeholder="Ask a question about your documents..."
+                    autocomplete="off"
+                    required
+                >
+
+
+                <button
+                    type="submit"
+                    id="sendButton"
+                    title="Ask Question"
+                >
+                    ➤
+                </button>
+
+            </form>
+
+
+            <div class="disclaimer">
+                AI can make mistakes. Verify important information.
+            </div>
+
+        </div>
+
+    </main>
+
+</div>
+
+
+<!-- =========================================================
+     JAVASCRIPT
+========================================================== -->
+
+<script>
+
+
+/* =========================================================
+   FILE SELECTION
+========================================================= */
+
+const documentInput =
+    document.getElementById("document");
+
+const selectedFile =
+    document.getElementById("selectedFile");
+
+const selectedFileName =
+    document.getElementById("selectedFileName");
+
+const selectedFileSize =
+    document.getElementById("selectedFileSize");
+
+const removeFile =
+    document.getElementById("removeFile");
+
+
+documentInput.addEventListener(
+    "change",
+    function () {
+
+        if (this.files.length === 0) {
+
+            return;
+
+        }
+
+
+        const file =
+            this.files[0];
+
+
+        selectedFileName.textContent =
+            file.name;
+
+
+        const sizeMB =
+            file.size / (1024 * 1024);
+
+
+        selectedFileSize.textContent =
+            sizeMB.toFixed(2) + " MB";
+
+
+        selectedFile.style.display =
+            "flex";
+
+    }
+);
+
+
+removeFile.addEventListener(
+    "click",
+    function () {
+
+        documentInput.value = "";
+
+        selectedFile.style.display =
+            "none";
+
+    }
+);
+
+
+/* =========================================================
+   CHAT
+========================================================= */
+
+const questionForm =
+    document.getElementById("questionForm");
+
+const questionInput =
+    document.getElementById("questionInput");
+
+const sendButton =
+    document.getElementById("sendButton");
+
+const chatMessages =
+    document.getElementById("chatMessages");
+
+
+/* =========================================================
+   QUESTION SUBMISSION
+========================================================= */
+
+questionForm.addEventListener(
+    "submit",
+    async function (event) {
+
+        event.preventDefault();
+
+
+        const question =
+            questionInput.value.trim();
+
+
+        if (!question) {
+
+            return;
+
+        }
+
+
+        /* -----------------------------------------------
+           FIX: remove the "Upload a document to get
+           started" placeholder once the chat begins
+        ------------------------------------------------ */
+
+        const emptyChat =
+            chatMessages.querySelector(".empty-chat");
+
+
+        if (emptyChat) {
+
+            emptyChat.remove();
+
+        }
+
+
+        /* -----------------------------------------------
+           Show user question
+        ------------------------------------------------ */
+
+        const userMessage =
+            document.createElement("div");
+
+
+        userMessage.className =
+            "message user-message";
+
+
+        userMessage.innerHTML = `
+
+            <div class="user-bubble">
+
+                ${escapeHtml(question)}
+
+            </div>
+
+        `;
+
+
+        chatMessages.appendChild(
+            userMessage
+        );
+
+
+        /* -----------------------------------------------
+           Clear input
+        ------------------------------------------------ */
+
+        questionInput.value =
+            "";
+
+
+        /* -----------------------------------------------
+           Disable controls
+        ------------------------------------------------ */
+
+        questionInput.disabled =
+            true;
+
+        sendButton.disabled =
+            true;
+
+
+        /* -----------------------------------------------
+           Show Thinking
+        ------------------------------------------------ */
+
+        const thinkingMessage =
+            document.createElement("div");
+
+
+        thinkingMessage.className =
+            "message assistant-message";
+
+
+        thinkingMessage.innerHTML = `
+
+            <div class="message-icon">
+                ✦
+            </div>
+
+
+            <div class="message-content thinking-content">
+
+                <span class="thinking-text">
+                    Thinking
+                </span>
+
+                <span class="thinking-dots">
+                    <span>.</span>
+                    <span>.</span>
+                    <span>.</span>
+                </span>
+
+            </div>
+
+        `;
+
+
+        chatMessages.appendChild(
+            thinkingMessage
+        );
+
+
+        scrollChat();
+
+
+        try {
+
+
+            /* -------------------------------------------
+               Send request to Flask
+            -------------------------------------------- */
+
+            const formData =
+                new FormData();
+
+
+            formData.append(
+                "question",
+                question
+            );
+
+
+            const response =
+                await fetch(
+                    "/ask",
+                    {
+                        method: "POST",
+                        body: formData
+                    }
+                );
+
+
+            const data =
+                await response.json();
+
+
+            /* -------------------------------------------
+               Remove Thinking
+            -------------------------------------------- */
+
+            thinkingMessage.remove();
+
+
+            /* -------------------------------------------
+               Build Sources
+            -------------------------------------------- */
+
+            let sourcesHTML =
+                "";
+
+
+            if (
+                data.sources &&
+                data.sources.length > 0
+            ) {
+
+                sourcesHTML = `
+
+                    <div class="source-box">
+
+                        <span class="source-label">
+                            Sources
+                        </span>
+
+
+                        ${data.sources
+                            .map(
+                                source => `
+
+                                    <div>
+
+                                        📄
+                                        ${escapeHtml(
+                                            source.source
+                                        )}
+
+                                        · Page
+
+                                        ${escapeHtml(
+                                            String(
+                                                source.page
+                                            )
+                                        )}
+
+                                    </div>
+
+                                `
+                            )
+                            .join("")
+                        }
+
+                    </div>
+
+                `;
+
+            }
+
+
+            /* -------------------------------------------
+               Build Assistant Message
+
+               FIX: the <p> and the answer are on ONE line
+               and the answer is trimmed. .message-content p
+               uses white-space: pre-wrap, so any line break
+               or indentation inside <p> showed up as blank
+               space above and below the answer.
+            -------------------------------------------- */
+
+            const answerText =
+                String(
+                    data.answer ?? "No answer was returned."
+                ).trim();
+
+
+            const assistantMessage =
+                document.createElement("div");
+
+
+            assistantMessage.className =
+                "message assistant-message";
+
+
+            assistantMessage.innerHTML = `<div class="message-icon">✦</div><div class="message-content"><p>${escapeHtml(answerText)}</p>${sourcesHTML}</div>`;
+
+
+            chatMessages.appendChild(
+                assistantMessage
+            );
+
+
+            scrollChat();
+
+
+        } catch (error) {
+
+
+            console.error(error);
+
+
+            /* -------------------------------------------
+               Remove Thinking
+            -------------------------------------------- */
+
+            thinkingMessage.remove();
+
+
+            /* -------------------------------------------
+               Show Error (FIX: <p> text on one line)
+            -------------------------------------------- */
+
+            const errorMessage =
+                document.createElement("div");
+
+
+            errorMessage.className =
+                "message assistant-message";
+
+
+            errorMessage.innerHTML = `<div class="message-icon">✦</div><div class="message-content"><p>Sorry, something went wrong while processing your question.</p></div>`;
+
+
+            chatMessages.appendChild(
+                errorMessage
+            );
+
+
+            scrollChat();
+
+        }
+
+
+        /* -----------------------------------------------
+           Enable controls
+        ------------------------------------------------ */
+
+        questionInput.disabled =
+            false;
+
+        sendButton.disabled =
+            false;
+
+
+        questionInput.focus();
+
+    }
+);
+
+
+/* =========================================================
+   SCROLL CHAT
+========================================================= */
+
+function scrollChat() {
+
+    chatMessages.scrollTop =
+        chatMessages.scrollHeight;
+
+}
+
+
+/* =========================================================
+   HTML ESCAPE
+========================================================= */
+
+function escapeHtml(text) {
+
+    const div =
+        document.createElement("div");
+
+
+    div.textContent =
+        text;
+
+
+    return div.innerHTML;
+
+}
+
+
+/* =========================================================
+   NEW CHAT
+========================================================= */
+
+const newChatButton =
+    document.getElementById("newChatButton");
+
+
+newChatButton.addEventListener(
+    "click",
+    function () {
+
+        chatMessages.innerHTML = `
+
+            <div class="empty-chat">
+
+                <div class="empty-chat-icon">
+                    ✦
+                </div>
+
+                <h3>
+                    Upload a document to get started
+                </h3>
+
+                <p>
+                    Upload a PDF from the left panel and ask
+                    questions about its content.
+                </p>
+
+            </div>
+
+        `;
+
+    }
+);
+
+/* =========================================================
+   DOCUMENT STATUS UPDATES
+========================================================= */
+
+function setupDocumentStatusPolling() {
+
+    document.querySelectorAll(".file-row").forEach(row => {
+
+        const fileNameElement =
+            row.querySelector(".file-name span:last-child");
+
+        const statusElement =
+            row.querySelector(".status");
+
+        if (!fileNameElement || !statusElement) {
+            return;
+        }
+
+        const filename =
+            fileNameElement.textContent.trim();
+
+        statusElement.dataset.filename = filename;
+        statusElement.classList.add("status-badge");
+    });
+}
+
+
+function updateDocumentStatuses() {
+
+    fetch("/document-status")
+        .then(response => response.json())
+        .then(statuses => {
+
+            document.querySelectorAll(".status-badge").forEach(badge => {
+
+                const filename =
+                    badge.dataset.filename;
+
+                if (!filename || !statuses[filename]) {
+                    return;
+                }
+
+                const status =
+                    statuses[filename];
+
+                badge.textContent = status;
+
+                badge.classList.remove(
+                    "indexed",
+                    "processing",
+                    "failed",
+                    "status-indexed",
+                    "status-processing",
+                    "status-failed"
+                );
+
+                if (status === "Processing") {
+
+                    badge.classList.add(
+                        "processing",
+                        "status-processing"
+                    );
+
+                } else if (status === "Indexed") {
+
+                    badge.classList.add(
+                        "indexed",
+                        "status-indexed"
+                    );
+
+                } else if (status === "Failed") {
+
+                    badge.classList.add(
+                        "failed",
+                        "status-failed"
+                    );
+                }
+            });
+
+        })
+        .catch(error => {
+
+            console.error(
+                "Error checking document status:",
+                error
+            );
+
+        });
+}
+
+
+/* Set up filename references */
+setupDocumentStatusPolling();
+
+
+/* Check status every 2 seconds */
+setInterval(
+    updateDocumentStatuses,
+    2000
+);
+
+
+/* Check once immediately */
+updateDocumentStatuses();
+
+
+</script>
+
+
+</body>
+
+</html>
+
+function updateDocumentStatuses() {
+
+    fetch("/document-status")
+        .then(response => response.json())
+        .then(statuses => {
+
+            document.querySelectorAll(".status-badge").forEach(badge => {
+
+                const filename = badge.dataset.filename;
+
+                if (statuses[filename]) {
+
+                    const status = statuses[filename];
+
+                    badge.textContent = status;
+
+                    badge.className = "status-badge";
+
+                    if (status === "Processing") {
+                        badge.classList.add("status-processing");
+                    }
+
+                    else if (status === "Indexed") {
+                        badge.classList.add("status-indexed");
+                    }
+
+                    else if (status === "Failed") {
+                        badge.classList.add("status-failed");
+                    }
+                }
+            });
+
+        })
+        .catch(error => {
+            console.error(
+                "Error checking document status:",
+                error
+            );
+        });
+}
+
+setInterval(
+    updateDocumentStatuses,
+    2000
+);

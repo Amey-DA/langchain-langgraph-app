@@ -85,9 +85,8 @@ def main():
         elif not isinstance(result, pd.DataFrame):
             result = pd.DataFrame({"VALUE": [result]})
 
-        # Pivot tables: move a meaningful index into columns.
-        if not isinstance(result.index, pd.RangeIndex):
-            result = result.reset_index()
+        # Preserve the DataFrame index.
+        # Reset only when the LLM explicitly needs the index as a column.
 
         # Flatten MultiIndex columns.
         if isinstance(result.columns, pd.MultiIndex):

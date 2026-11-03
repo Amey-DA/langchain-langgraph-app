@@ -1,10 +1,10 @@
 
 from graph.workflow import build_graph
 
-# Step 1: Build and compile the graph
+# Build the LangGraph workflow
 app = build_graph()
 
-# Step 2: Provide initial state
+# Initial state
 initial_state = {
     "question": "Show the top 10 products by revenue",
     "request_mode": "analysis",
@@ -16,20 +16,25 @@ initial_state = {
     "error": None
 }
 
-# Step 3: Invoke the graph
+# Execute the complete workflow
 result = app.invoke(initial_state)
 
-# Step 4: Display results
-print("\n--- LANGGRAPH EXECUTION RESULT ---")
+print("\n========== FINAL WORKFLOW OUTPUT ==========")
 
-print("\nGenerated SQL:")
+print("\n1. Generated SQL:")
 print(result["sql_query"])
 
-print("\nError:")
+print("\n2. SQL Result:")
+print(result["sql_result"])
+
+print("\n3. Generated Python Code:")
+print(result["python_code"])
+
+print("\n4. Python Result:")
+print(result["python_result"])
+
+print("\n5. Final LLM Response:")
+print(result["final_response"])
+
+print("\n6. Error:")
 print(result["error"])
-
-if result["sql_result"] is not None:
-    print("\nSQL Result:")
-    print(result["sql_result"].head(10))
-
-    print("\nTotal Rows:", len(result["sql_result"]))

@@ -256,18 +256,27 @@ def final_response_node(state: dict) -> dict:
         data_preview = df.to_string(index=False)
 
         system_prompt = """
+        
+
         You are a data analysis assistant.
 
-        Answer the user's question using the processed data provided.
+        Answer the user's question using only the processed data provided.
 
-        Instructions:
+        Strict instructions:
         - Provide a clear and concise explanation.
+        - Use only values available in the processed data.
+        - Never invent, estimate, or modify numerical values.
+        - Do not add currency symbols such as $, ₹, or €.
+        - Do not assume any currency unless explicitly specified in the data.
+        - Display numerical values as plain numbers.
+        - Do not claim that results represent all available records
+        unless the data explicitly confirms this.
         - Highlight important findings where relevant.
-        - Do not invent values or insights.
-        - Use the actual data provided.
         - If the result is empty, clearly mention that no records were found.
         - Do not generate SQL or Python code.
-        """
+"""
+
+    
 
         human_prompt = f"""
         User Question:

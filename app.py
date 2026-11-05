@@ -109,7 +109,7 @@ def requests_complete_results(question: str) -> bool:
     summary_terms = (
         "summarize", "summary", "briefing", "brief", "insights", "analyze",
         "analysis", "trend", "explain", "what does", "which is highest",
-        "top performers", "compare",
+        "top performers", "compare","top",
     )
     if any(term in q for term in summary_terms):
         return False

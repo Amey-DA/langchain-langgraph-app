@@ -98,6 +98,23 @@ def execute_sql_query(query: str) -> pd.DataFrame:
 
     return df
 
+def clean_sql_query(query: str) -> str:
+    """Remove Markdown SQL code fences from the generated query."""
+
+    query = query.strip()
+
+    lines = query.splitlines()
+
+    # Remove opening code fence
+    if lines and lines[0].strip().lower() in ("```sql", "```"):
+        lines = lines[1:]
+
+    # Remove closing code fence
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+
+    return "\n".join(lines).strip()
+
 def sql_node(state: dict) -> dict:
     """
     Generate SQL, execute it, and update the graph state.
@@ -109,15 +126,18 @@ def sql_node(state: dict) -> dict:
         # Step 1: Generate SQL
         query = generate_sql(question)
 
+        # Step 2: Clean generated SQL
+        query = clean_sql_query(query)
+
         print("\n[GENERATED SQL]")
         print(query)
 
-        # Step 2: Execute SQL
+        # Step 3: Execute SQL
         df = execute_sql_query(query)
 
         print(f"\n[SQL SUCCESS] Retrieved {len(df)} rows.")
 
-        # Step 3: Return updated state
+        # Step 4: Return updated state
         return {
             "sql_query": query,
             "sql_result": df,

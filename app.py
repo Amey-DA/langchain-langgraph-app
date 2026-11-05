@@ -123,6 +123,26 @@ def requests_complete_results(question: str) -> bool:
     return any(term in q for term in full_result_terms)
 
 
+def requests_analysis(question: str) -> bool:
+    """Identify requests that require analytical processing."""
+
+    q = question.lower()
+
+    analysis_terms = (
+        "analyze", "analyse", "analysis",
+        "calculate", "compare", "comparison",
+        "trend", "trends", "average",
+        "percentage", "contribution",
+        "highest", "lowest",
+        "performance", "performing",
+        "insights", "summarize", "summary",
+        "total", "growth", "distribution",
+        "correlation", "identify",
+    )
+
+    return any(term in q for term in analysis_terms)
+
+
 def format_sql_result_as_table(result: dict) -> str:
     """Display rows as a markdown table without involving the LLM."""
     columns, rows = result["columns"], result["rows"]

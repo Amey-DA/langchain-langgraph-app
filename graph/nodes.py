@@ -206,21 +206,111 @@ def generate_python_code(
 
     return response.content.strip()
 
+def generate_analysis_code(
+    question: str,
+    df: pd.DataFrame,
+    previous_error: str | None = None
+) -> str:
+
+    columns = list(df.columns)
+    data_types = df.dtypes.astype(str).to_dict()
+    sample_data = df.head(20).to_dict(orient="records")
+
+    system_prompt = f"""
+    You are an expert Python and Pandas data analyst.
+
+    Your task is to generate Python code to analyze the
+    complete DataFrame based on the user's question.
+
+    IMPORTANT:
+    The sample data is provided only to understand the
+    structure and contents of the DataFrame.
+    The actual execution will happen on the COMPLETE DataFrame.
+
+    RULES:
+    1. The complete dataset is available as a DataFrame named df.
+    2. Pandas is already imported as pd.
+    3. Do not import any libraries.
+    4. Do not access files, databases, or networks.
+    5. Do not use print statements.
+    6. Assign the final analysis result to a variable named result.
+    7. Result MUST always be a Pandas DataFrame.
+    8. Wrap scalar results in a DataFrame.
+    9. Return only executable Python code.
+    10. Do not include Markdown code fences.
+    11. Perform calculations using the complete DataFrame.
+    12. Do not calculate results using only the sample data.
+
+    DATAFRAME INFORMATION:
+    Columns: {columns}
+    Data types: {data_types}
+    Total rows: {len(df)}
+
+    SAMPLE DATA (first 20 rows):
+    {sample_data}
+
+    PREVIOUS EXECUTION ERROR:
+    {previous_error if previous_error else "No previous error. This is the first attempt."}
+
+    If a previous execution error exists, correct the code
+    to address that error.
+    """
+
+    response = llm.invoke([
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=question)
+    ])
+
+    return response.content.strip()
 
 def python_node(state: dict) -> dict:
     """
-    Generate Python code, execute it on the SQL DataFrame,
-    and update the graph state.
+    Execute Python code using the existing sandbox.
+
+    MODE 1: Initial Python processing using sql_result.
+    MODE 2: Analysis execution using analysis_code on python_result.
     """
 
     try:
-        # Step 1: Retrieve SQL result from graph state
+        # Stop if Analysis Node failed to generate code
+        if state.get("error") and not state.get("analysis_code"):
+            return {}
+
+        # MODE 2: Execute analysis code
+        if state.get("analysis_code"):
+
+            df = state["python_result"]
+            code = state["analysis_code"]
+
+            if df is None:
+                raise ValueError(
+                    "No original processed DataFrame available for analysis."
+                )
+
+            print("\n[ANALYSIS EXECUTION]")
+            print(code)
+
+            result_df, error = run_python_on_dataframe(df, code)
+
+            if error:
+                raise RuntimeError(error)
+
+            print(
+                f"\n[ANALYSIS SUCCESS] Generated {len(result_df)} result rows."
+            )
+
+            return {
+                "analysis_result": result_df,
+                "analysis_code": "",
+                "error": None
+            }
+
+        # MODE 1: Initial Python processing
         df = state["sql_result"]
 
         if df is None:
-            raise ValueError("No SQL result available for Python analysis.")
+            raise ValueError("No SQL result available for Python processing.")
 
-        # Step 2: Generate Python code
         code = generate_python_code(
             question=state["question"],
             df=df,
@@ -230,13 +320,11 @@ def python_node(state: dict) -> dict:
         print("\n[GENERATED PYTHON CODE]")
         print(code)
 
-        # Step 3: Execute generated code using existing sandbox
         result_df, error = run_python_on_dataframe(df, code)
 
         if error:
             raise RuntimeError(error)
 
-        # Step 4: Return updated graph state
         print(f"\n[PYTHON SUCCESS] Processed {len(result_df)} rows.")
 
         return {
@@ -246,13 +334,95 @@ def python_node(state: dict) -> dict:
         }
 
     except Exception as error:
+
         print(f"\n[PYTHON ERROR] {error}")
 
+        return {"error": str(error)}
+
+def analysis_node(state: dict) -> dict:
+
+    attempt = state.get("analysis_attempts", 0) + 1
+
+    try:
+        df = state["python_result"]
+
+        if df is None:
+            raise ValueError(
+                "No processed DataFrame available for analysis."
+            )
+
+        code = generate_analysis_code(
+            question=state["question"],
+            df=df,
+            previous_error=state.get("error")
+        )
+
+        print(f"\n[ANALYSIS ATTEMPT {attempt}]")
+        print("\n[GENERATED ANALYSIS CODE]")
+        print(code)
+
         return {
-            "python_code": "",
-            "python_result": None,
+            "analysis_code": code,
+            "analysis_attempts": attempt,
+            "error": None
+        }
+
+    except Exception as error:
+
+        print(f"\n[ANALYSIS NODE ERROR] {error}")
+
+        return {
+            "analysis_attempts": attempt,
             "error": str(error)
         }
+
+def route_after_python(state: dict) -> str:
+    """Route based on analysis requirement and execution status."""
+
+    # Analysis completed successfully
+    if state.get("analysis_result") is not None:
+        print("\n[ROUTER] Analysis completed. Moving to Final Response.")
+        return "final_response_node"
+
+    # Handle errors
+    if state.get("error"):
+
+        attempts = state.get("analysis_attempts", 0)
+
+        if 0 < attempts < 2:
+            print(
+                f"\n[ROUTER] Analysis failed. "
+                f"Retrying (attempt {attempts + 1})."
+            )
+            return "analysis_node"
+
+        print("\n[ROUTER] Maximum attempts reached or initial error.")
+        return "final_response_node"
+
+    # Check initial Python processing result
+    df = state.get("python_result")
+
+    if df is None:
+        return "final_response_node"
+
+    row_threshold = 50
+
+    if (
+        state.get("analysis_required", False)
+        and len(df) > row_threshold
+    ):
+        print(
+            f"\n[ROUTER] {len(df)} rows detected. "
+            "Routing to Analysis Node."
+        )
+        return "analysis_node"
+
+    print(
+        f"\n[ROUTER] {len(df)} rows detected. "
+        "Routing directly to Final Response Node."
+    )
+
+    return "final_response_node"
 
 
 def final_response_node(state: dict) -> dict:
@@ -260,24 +430,45 @@ def final_response_node(state: dict) -> dict:
 
     try:
         question = state["question"]
-        df = state["python_result"]
 
         if state.get("error"):
             return {
-                "final_response": f"Unable to complete the request: {state['error']}"
+                "final_response": (
+                    f"Unable to complete the request: {state['error']}"
+                )
             }
+
+        # Prefer analysis output when available
+        analysis_df = state.get("analysis_result")
+
+        if analysis_df is not None:
+            df = analysis_df
+            data_source = "Analysis Result"
+
+        else:
+            df = state.get("python_result")
+            data_source = "Processed Data"
 
         if df is None:
             return {
                 "final_response": "No processed data is available."
             }
 
-        # Convert the processed DataFrame into text for the LLM
+        # Avoid sending large raw datasets to the LLM
+        if len(df) > 50 and analysis_df is None:
+            return {
+                "final_response": (
+                    f"Successfully retrieved {len(df)} records. "
+                    "The complete processed dataset is available "
+                    "separately in the results output."
+                ),
+                "error": None
+            }
+
+        # Convert selected DataFrame into text
         data_preview = df.to_string(index=False)
 
         system_prompt = """
-        
-
         You are a data analysis assistant.
 
         Answer the user's question using only the processed data provided.
@@ -287,20 +478,21 @@ def final_response_node(state: dict) -> dict:
         - Use only values available in the processed data.
         - Never invent, estimate, or modify numerical values.
         - Do not add currency symbols such as $, ₹, or €.
-        - Do not assume any currency unless explicitly specified in the data.
+        - Do not assume any currency unless explicitly specified.
         - Display numerical values as plain numbers.
-        - Do not claim that results represent all available records
-        unless the data explicitly confirms this.
+        - Do not claim results represent all available records
+          unless the data explicitly confirms this.
         - Highlight important findings where relevant.
         - If the result is empty, clearly mention that no records were found.
         - Do not generate SQL or Python code.
-"""
-
-    
+        """
 
         human_prompt = f"""
         User Question:
         {question}
+
+        Data Source:
+        {data_source}
 
         Processed Data:
         {data_preview}

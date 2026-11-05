@@ -2,7 +2,7 @@
 import pandas as pd
 
 from graph.workflow import build_graph
-from app import requests_complete_results
+from app import requests_complete_results, requests_analysis
 
 
 # Initialize the compiled LangGraph workflow
@@ -34,21 +34,32 @@ def main():
 
         # Determine request mode
         is_full_result = requests_complete_results(question)
+        analysis_required = requests_analysis(question)
+
         request_mode = "full_results" if is_full_result else "analysis"
 
         print(f"\nRequest Mode: {request_mode}")
+        print(f"Analysis Required: {analysis_required}")
 
         # Prepare initial state
         initial_state = {
-            "question": question,
-            "request_mode": request_mode,
-            "sql_query": "",
-            "sql_result": None,
-            "python_code": "",
-            "python_result": None,
-            "final_response": "",
-            "error": None
-        }
+                "question": question,
+                "request_mode": request_mode,
+
+                "sql_query": "",
+                "sql_result": None,
+
+                "python_code": "",
+                "python_result": None,
+
+                "analysis_required": analysis_required,
+                "analysis_code": "",
+                "analysis_result": None,
+                "analysis_attempts": 0,
+
+                "final_response": "",
+                "error": None
+            }
 
         print("\nExecuting LangGraph workflow...")
 

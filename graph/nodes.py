@@ -43,7 +43,6 @@ def generate_sql(question: str) -> str:
 
     return response.content.strip()
 
-
 def execute_sql_query(query: str) -> pd.DataFrame:
     """
     Validate and execute a read-only SQL query.
@@ -372,6 +371,7 @@ def analysis_node(state: dict) -> dict:
         print(f"\n[ANALYSIS NODE ERROR] {error}")
 
         return {
+            "analysis_code": "",
             "analysis_attempts": attempt,
             "error": str(error)
         }
@@ -423,6 +423,7 @@ def route_after_python(state: dict) -> str:
     )
 
     return "final_response_node"
+
 
 
 def final_response_node(state: dict) -> dict:
@@ -517,6 +518,7 @@ def final_response_node(state: dict) -> dict:
             "final_response": "",
             "error": str(e)
         }
+
 
 
 

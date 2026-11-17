@@ -24,6 +24,15 @@ BANNED_ATTRS = {
     "tofile", "memmap", "eval", "query", "io", "os", "sys", "system", "popen",
 }
 
+BANNED_ATTRS |= {
+    "fromregex", "DataSource", "ExcelFile", "ExcelWriter", "HDFStore",
+}
+
+ALLOWED_TO_METHODS = {
+    "to_datetime", "to_numeric", "to_timedelta", "to_dict", "to_list",
+    "to_numpy", "to_frame", "to_period", "to_timestamp", "to_series",
+}
+
 SAFE_BUILTINS = {
     name: getattr(builtins, name)
     for name in (
@@ -50,6 +59,10 @@ def validate_code(code: str):
         if isinstance(node, ast.Attribute):
             if node.attr.startswith("_") or node.attr in BANNED_ATTRS:
                 return f"Attribute '{node.attr}' is not allowed."
+            if node.attr.startswith("read_"):
+                return f"Attribute '{node.attr}' is not allowed."
+            if node.attr.startswith("to_") and node.attr not in ALLOWED_TO_METHODS:
+                return f"Attribute '{node.attr}' is not allowed."
         if isinstance(node, ast.Name):
             if node.id.startswith("__") or node.id in BANNED_NAMES:
                 return f"Name '{node.id}' is not allowed."
@@ -69,7 +82,11 @@ def main():
         emit({"ok": False, "error": error})
         return
 
-    df = pd.read_json(io.StringIO(payload["df"]), orient="split", convert_dates=False)
+    df = pd.read_json(
+        io.StringIO(payload["df"]), orient="split",
+        convert_dates=False, dtype=False,
+    )    
+    
     namespace = {"__builtins__": SAFE_BUILTINS, "df": df, "pd": pd, "np": np}
 
     try:
@@ -85,8 +102,17 @@ def main():
         elif not isinstance(result, pd.DataFrame):
             result = pd.DataFrame({"VALUE": [result]})
 
-        # Preserve the DataFrame index.
-        # Reset only when the LLM explicitly needs the index as a column.
+        # Keep group labels: turn a named, multi-level or non-integer index
+        # into columns, otherwise drop the meaningless integer index.
+        idx = result.index
+        if (
+            isinstance(idx, pd.MultiIndex)
+            or idx.name is not None
+            or not pd.api.types.is_integer_dtype(idx)
+        ):
+            result = result.reset_index()
+        else:
+            result = result.reset_index(drop=True)
 
         # Flatten MultiIndex columns.
         if isinstance(result.columns, pd.MultiIndex):

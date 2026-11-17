@@ -1206,6 +1206,15 @@
       "to_column": "COUNTRY_CODE",
       "verification_status": "verified_by_data",
       "description": "Connects a retailer site to its country using the country code."
+    },
+    {
+      "relationship_type": "logical",
+      "from_table": "dbo.DM_RETAILER",
+      "from_column": "RETAILER_COUNTRY_CODE",
+      "to_table": "dbo.DM_COUNTRY",
+      "to_column": "COUNTRY_CODE",
+      "verification_status": "verified_by_data",
+      "description": "Connects a retailer to its home country using the country code."
     }
   ],
   "metadata_notes": [

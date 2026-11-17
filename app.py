@@ -56,11 +56,11 @@ if not api_key or not project_id:
 # --------------------------------------------------
 
 llm = ChatWatsonx(
-    model_id="meta-llama/llama-3-3-70b-instruct",
+    model_id="meta-llama/llama-4-maverick-17b-128e-instruct-fp8",
     url="https://us-south.ml.cloud.ibm.com",
     api_key=api_key,
     project_id=project_id,
-    params={"temperature": 0, "max_tokens": 2000},
+    params={"temperature": 0, "max_tokens": 4000},
 )
 print("IBM watsonx model initialized successfully.")
 
@@ -221,6 +221,11 @@ def get_relevant_schema(question: str) -> str:
     if any(t in question_lower for t in ["sale", "sales", "quantity", "price", "revenue", "sold"]):
         selected.add("FCT_SALES")
 
+    # Dimensions connect to each other only through FCT_SALES,
+    # so include it whenever two or more dimensions are selected.
+    if len(selected - {"FCT_SALES"}) >= 2:
+        selected.add("FCT_SALES")
+
     changed = True
     while changed:
         changed = False
@@ -259,11 +264,19 @@ def get_relevant_schema(question: str) -> str:
             f"Description: {table.get('description', 'Not available')}"
         )
         parts.append("Columns:")
+
         for col in table.get("columns", []):
+            desc = col.get("description", "")
+            note = (
+                f" [note: {desc}]"
+                if re.search(r"verif|ambiguous|stored as text", desc, re.I)
+                else ""
+            )
             parts.append(
                 f"- {col.get('name')} ({col.get('data_type')})"
-                f"{' [PRIMARY KEY]' if col.get('primary_key') else ''}"
+                f"{' [PRIMARY KEY]' if col.get('primary_key') else ''}{note}"
             )
+
         for rel in table.get("relationships", []):
             parts.append(f"Declared foreign-key relationship: {rel}")
 
@@ -275,6 +288,11 @@ def get_relevant_schema(question: str) -> str:
                 f"{rel.get('to_table')}.{rel.get('to_column')} "
                 f"(Status: {rel.get('verification_status', 'unspecified')})"
             )
+
+    notes = DATABASE_METADATA.get("metadata_notes", [])
+    if notes:
+        parts.append("\nIMPORTANT NOTES:")
+        parts.extend(f"- {n}" for n in notes)
 
     return "\n".join(parts)
 
@@ -436,7 +454,11 @@ def run_python_on_dataframe(df: pd.DataFrame, code: str):
     if not out.get("ok"):
         return None, f"Error: {out.get('error')}"
 
-    result_df = pd.read_json(io.StringIO(out["df"]), orient="split", convert_dates=False)
+    result_df = pd.read_json(
+        io.StringIO(out["df"]), orient="split",
+        convert_dates=False, dtype=False,
+    )
+        
     return result_df, None
 
 

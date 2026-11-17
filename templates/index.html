@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Assistant</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div class="app-container">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="app-logo">D</div>
+            <span>Data Assistant</span>
+        </div>
+
+        <form action="{{ url_for('new_chat') }}" method="POST">
+            <button type="submit" class="new-chat-btn"><span>+</span>New chat</button>
+        </form>
+
+        <div class="sidebar-section">
+            <p class="sidebar-label">Workspace</p>
+            <div class="sidebar-item active"><span>▤</span>Sales Data Assistant</div>
+        </div>
+
+        <div class="sidebar-footer">
+            <div class="profile-icon">DA</div>
+            <div>
+                <p class="profile-name">Data Assistant</p>
+                <p class="profile-status">Powered by LangGraph</p>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main-content">
+
+        <header class="chat-header">
+            <div>
+                <h3>Sales Data Assistant</h3>
+                <p>Ask questions about your GoSalesDW database</p>
+            </div>
+            <div class="connection-status"><span class="status-dot"></span>SQL Server connected</div>
+        </header>
+
+        <section class="chat-area" id="chatArea" aria-label="Conversation">
+
+            {% if not messages %}
+            <div class="welcome-screen">
+                <h1>What would you like to know about your sales?</h1>
+                <p>Ask in plain English. The assistant writes the SQL, runs it, and explains the result.</p>
+
+                <div class="suggestion-grid">
+                    {% for title, q in [
+                        ("Sales analysis", "Analyze total sales across product categories."),
+                        ("Customer insights", "Identify customers with the highest purchases."),
+                        ("Quarterly trends", "Compare sales performance across quarters."),
+                        ("Product performance", "Find the best-performing products.")
+                    ] %}
+                    <form action="{{ url_for('home') }}" method="POST" class="js-ask">
+                        <button type="submit" name="question" value="{{ q }}" class="suggestion-card">
+                            <h4>{{ title }}</h4>
+                            <p>{{ q }}</p>
+                        </button>
+                    </form>
+                    {% endfor %}
+                </div>
+            </div>
+
+            {% else %}
+            <div class="messages-container">
+                {% for message in messages %}
+
+                    {% if message.role == "user" %}
+                    <div class="message user-message">
+                        <div class="message-content">
+                            {% if message.timestamp %}<div class="message-timestamp">{{ message.timestamp }}</div>{% endif %}
+                            <p>{{ message.content }}</p>
+                        </div>
+                    </div>
+
+                    {% else %}
+                    <div class="message assistant-message">
+                        <div class="message-avatar assistant-avatar">✦</div>
+                        <div class="message-content">
+
+                            <div class="message-meta">
+                                <span class="assistant-name">Data Assistant</span>
+                                {% if message.timestamp %}<span class="message-timestamp">{{ message.timestamp }}</span>{% endif %}
+                            </div>
+
+                            {% if message.request_mode %}
+                            <div class="response-metadata">
+                                <span class="chip">{{ message.request_mode }}</span>
+                                {% if message.analysis_required %}<span class="chip chip-accent">Analysis applied</span>{% endif %}
+                            </div>
+                            {% endif %}
+
+                            <div class="assistant-response">{{ (message.content or "No response was generated.") | trim }}</div>
+
+                            {% if message.error %}
+                            <div class="error-panel" role="alert">
+                                <strong>Something went wrong</strong>
+                                <p>{{ message.error }}</p>
+                            </div>
+                            {% endif %}
+
+                            {% if message.sql_query %}
+                            <details class="result-details">
+                                <summary>Generated SQL</summary>
+                                <div class="code-wrap">
+                                    <button type="button" class="copy-btn" data-copy>Copy</button>
+                                    <pre><code>{{ message.sql_query }}</code></pre>
+                                </div>
+                            </details>
+                            {% endif %}
+
+                            {% if message.columns %}
+                            <details class="result-details" {% if loop.last %}open{% endif %}>
+                                <summary>Results <span class="count">{{ message.row_count }} {{ 'row' if message.row_count == 1 else 'rows' }}</span></summary>
+                                <div class="table-container">
+                                    <table class="data-table">
+                                        <thead>
+                                            <tr>{% for column in message.columns %}<th>{{ column }}</th>{% endfor %}</tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for row in message.rows %}
+                                            <tr>{% for value in row %}<td>{{ value }}</td>{% endfor %}</tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% if message.row_count > message.rows|length %}
+                                <p class="table-note">Showing the first {{ message.rows|length }} of {{ message.row_count }} rows.</p>
+                                {% endif %}
+                            </details>
+                            {% endif %}
+
+                        </div>
+                    </div>
+                    {% endif %}
+
+                {% endfor %}
+
+                <!-- Shown by JS while a question is running -->
+                <div class="message assistant-message" id="pending" hidden>
+                    <div class="message-avatar assistant-avatar">✦</div>
+                    <div class="message-content">
+                        <div class="message-meta"><span class="assistant-name">Data Assistant</span></div>
+                        <div class="thinking" role="status">
+                            Writing and running the query<span class="dots"><i></i><i></i><i></i></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </section>
+
+        <footer class="chat-input-area">
+            <form action="{{ url_for('home') }}" method="POST" class="chat-form js-ask">
+                <input type="text" name="question" id="questionInput"
+                       placeholder="Ask about your sales data…" maxlength="2000"
+                       autocomplete="off" aria-label="Ask a question about your sales data" required>
+                <button type="submit" class="send-btn" aria-label="Send question">↑</button>
+            </form>
+            <p class="input-disclaimer">Flask · LangGraph · SQL Server · Python</p>
+        </footer>
+    </main>
+</div>
+
+<script>
+(function () {
+    var chat = document.getElementById("chatArea");
+    var input = document.getElementById("questionInput");
+
+    // Open at the latest message
+    chat.scrollTop = chat.scrollHeight;
+    if (input) input.focus();
+
+    // Right-align numeric columns
+    document.querySelectorAll(".data-table").forEach(function (table) {
+        var rows = table.tBodies[0] ? table.tBodies[0].rows : [];
+        if (!rows.length) return;
+        for (var c = 0; c < rows[0].cells.length; c++) {
+            var numeric = true;
+            for (var r = 0; r < rows.length; r++) {
+                var v = rows[r].cells[c].textContent.trim().replace(/[,$₹%]/g, "");
+                if (v === "" || isNaN(Number(v))) { numeric = false; break; }
+            }
+            if (numeric) {
+                table.tHead.rows[0].cells[c].classList.add("num");
+                for (var r2 = 0; r2 < rows.length; r2++) rows[r2].cells[c].classList.add("num");
+            }
+        }
+    });
+
+    // Copy SQL
+    document.querySelectorAll("[data-copy]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+            var code = btn.parentElement.querySelector("code").textContent;
+            navigator.clipboard.writeText(code).then(function () {
+                btn.textContent = "Copied";
+                setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+            });
+        });
+    });
+
+    // Loading state while the backend runs (the page reloads when it finishes)
+    document.querySelectorAll("form.js-ask").forEach(function (form) {
+        form.addEventListener("submit", function (e) {
+            var submitter = e.submitter;
+            var text = (input && input.value.trim()) || (submitter && submitter.value) || "";
+            if (!text) return;
+            form.classList.add("is-busy");
+            document.querySelectorAll(".send-btn, .suggestion-card").forEach(function (b) {
+                setTimeout(function () { b.disabled = true; }, 0); // after the form data is captured
+            });
+            var pending = document.getElementById("pending");
+            if (pending) {
+                var bubble = document.createElement("div");
+                bubble.className = "message user-message";
+                bubble.innerHTML = '<div class="message-content"><p></p></div>';
+                bubble.querySelector("p").textContent = text;
+                pending.parentNode.insertBefore(bubble, pending);
+                pending.hidden = false;
+                chat.scrollTop = chat.scrollHeight;
+            }
+        });
+    });
+})();
+</script>
+</body>
+</html>

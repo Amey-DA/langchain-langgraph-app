@@ -13,7 +13,7 @@ from decimal import Decimal
 from pathlib import Path
 from langchain.agents.middleware import dynamic_prompt
 from dotenv import load_dotenv
-from langchain_ibm import ChatWatsonx
+from langchain_groq import ChatGroq
 from langchain.tools import tool
 from langchain.agents import create_agent
 from rag_application.retriever import search_documents
@@ -37,6 +37,29 @@ def load_database_metadata():
 DATABASE_METADATA = load_database_metadata()
 print(f"Loaded metadata for {len(DATABASE_METADATA.get('tables', []))} tables.")
 
+# Business Rules
+
+BUSINESS_RULES_FILE = Path(__file__).parent / "business_rules.json"
+
+
+def load_business_rules() -> str:
+    """Turn business_rules.json into prompt text."""
+    if not BUSINESS_RULES_FILE.exists():
+        return ""
+    with open(BUSINESS_RULES_FILE, "r", encoding="utf-8") as file:
+        rules = json.load(file)
+
+    lines = []
+    for name, rule in rules.items():
+        if rule.get("status") == "confirmed":
+            lines.append(f"- {name}: {rule.get('definition')}")
+        else:
+            lines.append(f"- {name}: NOT AVAILABLE. {rule.get('reason', '')}")
+    return "\n".join(lines)
+
+
+BUSINESS_RULES_TEXT = load_business_rules()
+
 
 # --------------------------------------------------
 # 1. Environment
@@ -44,25 +67,25 @@ print(f"Loaded metadata for {len(DATABASE_METADATA.get('tables', []))} tables.")
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
 
-api_key = os.getenv("WATSONX_PROJECT_KEY")
-project_id = os.getenv("WATSONX_PROJECT_ID")
+groq_api_key = os.getenv("GROQ_API_KEY")
 
-if not api_key or not project_id:
-    raise ValueError("Missing Watsonx API key or Project ID. Check the .env file.")
+if not groq_api_key:
+    raise ValueError("Missing GROQ_API_KEY. Check the .env file.")
 
 
 # --------------------------------------------------
 # 2. LLM
 # --------------------------------------------------
 
-llm = ChatWatsonx(
-    model_id="meta-llama/llama-4-maverick-17b-128e-instruct-fp8",
-    url="https://us-south.ml.cloud.ibm.com",
-    api_key=api_key,
-    project_id=project_id,
-    params={"temperature": 0, "max_tokens": 4000},
+llm = ChatGroq(
+    model="openai/gpt-oss-120b",
+    api_key=groq_api_key,
+    temperature=0,
+    max_tokens=4000,
+    max_retries=3,
+    timeout=60,
 )
-print("IBM watsonx model initialized successfully.")
+print("Groq model initialized successfully.")
 
 
 # --------------------------------------------------

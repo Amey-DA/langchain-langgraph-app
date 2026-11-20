@@ -1,0 +1,26 @@
+{
+  "revenue": {
+    "status": "confirmed",
+    "definition": "SUM(FCT_SALES.SALES_QUANTITY * FCT_SALES.UNIT_SALE_PRICE)"
+  },
+  "quantity": {
+    "status": "confirmed",
+    "definition": "SUM(FCT_SALES.SALES_QUANTITY)"
+  },
+  "cost": {
+    "status": "unavailable",
+    "reason": "No cost column exists in the database."
+  },
+  "profit": {
+    "status": "unavailable",
+    "reason": "Needs cost data, which is not in the database."
+  },
+  "discount": {
+    "status": "unavailable",
+    "reason": "No discount data exists."
+  },
+  "tax": {
+    "status": "unavailable",
+    "reason": "No tax rates or tax data exist."
+  }
+}

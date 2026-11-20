@@ -5,9 +5,11 @@ from decimal import Decimal
 
 import pandas as pd
 
-from app import llm, get_relevant_schema, get_sql_connection
+from app import llm, get_relevant_schema, get_sql_connection, BUSINESS_RULES_TEXT
 from langchain_core.messages import HumanMessage, SystemMessage
 from app import run_python_on_dataframe
+
+DISPLAY_ROWS = 100  # keep equal to PREVIEW_ROWS in flask_app.py
 
 def extract_code(raw: str) -> str:
     """
@@ -50,6 +52,7 @@ def generate_sql(
     question: str,
     previous_query: str | None = None,
     previous_error: str | None = None,
+    analysis_required: bool = False,
 ) -> str:
     """
     Generate a SQL Server SELECT query using the user's
@@ -59,6 +62,18 @@ def generate_sql(
     schema = get_relevant_schema(question)
 
     retry_block = ""
+
+    analysis_block = ""
+    if analysis_required:
+        analysis_block = """
+
+    ANALYSIS FOLLOWS THIS QUERY:
+    - Return ALL rows at the level the question asks for (for example,
+      one row per retailer or per product).
+    - Do NOT use TOP, ROW_NUMBER, RANK, window functions or percentage
+      calculations. Ranking and top-N selection happen in a later step.
+    """
+        
     if previous_error:
         retry_block = f"""
     PREVIOUS ATTEMPT FAILED.
@@ -100,6 +115,42 @@ def generate_sql(
     - Never join FCT_SALES.RETAILER_KEY to DM_COUNTRY.
     - Filter countries with DM_COUNTRY.COUNTRY (for example 'Canada').
       Column COUNTRY_NAME does not exist.
+    - Unless the user mentions ship or close date, join DM_DATE using
+      ORDER_DAY_KEY.
+    - A retailer site has no name column. Identify a site with
+      DM_RETAILER_SITE.RETAILER_SITE_CODE and DM_RETAILER_SITE.RETAILER_SITE_CITY.
+      RETAILER_SITE_CONTACT_NAME is a contact person, not the site name.
+    - When you show a site, add its retailer name by joining DM_RETAILER
+      on FCT_SALES.RETAILER_KEY.
+    - These columns DO NOT EXIST: SALES, SALES_AMOUNT, REVENUE, AMOUNT,
+      TOTAL_SALES, PRICE, COST. Create such measures with an alias in
+      the SELECT.
+    - When the question asks how many types, categories or kinds of something,
+      include that category column in the SELECT (for example RETAILER_TYPE),
+      so the application can count the distinct values.
+
+    MEASURE DEFINITIONS (maintained by the business):
+    {BUSINESS_RULES_TEXT}
+
+    MEASURE RULES:
+    - Use a measure only as defined above. Create it with an alias in
+      the SELECT; do not use it as a column name.
+    - If the question needs a measure marked NOT AVAILABLE, and the user did
+      not give the needed value in the question, do not write SQL. Reply
+      with exactly one line:
+      UNSUPPORTED: <reason>. Give the value in your question, for example
+      "assume 18% tax" or "assume cost is 60% of revenue".
+    - If the user gives a value (a tax rate, a discount, a cost
+      percentage), use exactly that value. Never change it or add your own.
+    - Never invent values, constants or placeholders to fill missing data.
+
+    TERMINOLOGY:
+    - "customer" and "customers" mean retailers (DM_RETAILER).
+      There is no customer table.
+    - "purchases" and "spend" mean revenue unless the user mentions quantity.
+    - "sales", "sales amount" and "total sales" mean revenue. "units sold" and "volume" mean quantity.
+
+    {analysis_block}
 
     {retry_block}
 
@@ -123,7 +174,7 @@ def execute_sql_query(query: str) -> pd.DataFrame:
     cleaned = query.strip()
 
     # 1. Allow only SELECT queries
-    if not re.match(r"(?is)^SELECT\b", cleaned):
+    if not re.match(r"(?is)^(SELECT|WITH)\b", cleaned):
         raise ValueError("Only SELECT queries are allowed.")
 
     # 2. Remove one trailing semicolon
@@ -147,6 +198,13 @@ def execute_sql_query(query: str) -> pd.DataFrame:
 
     if forbidden.search(cleaned):
         raise ValueError("The query contains a disallowed SQL operation.")
+
+    if re.search(r"\*\s*0(?:\.0+)?(?![\d.])", cleaned):
+        raise ValueError(
+            "The query multiplies by a constant 0, which is not a real "
+            "calculation. Use only real columns. If the data needed does "
+            "not exist, reply with: UNSUPPORTED: <reason>"
+        )
 
     # 6. Execute the validated query
     with closing(get_sql_connection()) as connection:
@@ -196,8 +254,30 @@ def sql_node(state: dict) -> dict:
 
         try:
             query = clean_sql_query(
-                generate_sql(question, last_query, last_error)
+                generate_sql(
+                    question,
+                    last_query,
+                    last_error,
+                    state.get("analysis_required", False),
+                )
             )
+
+            if re.match(r"(?is)^\s*UNSUPP\w*\s*:", query):
+                reason = query.split(":", 1)[1].strip()
+                print(f"\n[SQL UNSUPPORTED] {reason}")
+                return {
+                    "sql_query": "",
+                    "sql_result": None,
+                    "error": f"UNSUPPORTED: {reason}"
+                }
+
+            if not re.match(r"(?is)^\s*(SELECT|WITH)\b", query):
+                print(f"\n[SQL NOT A QUERY] {query[:200]}")
+                return {
+                    "sql_query": "",
+                    "sql_result": None,
+                    "error": f"UNSUPPORTED: {query[:200]}"
+                }
 
             print(f"\n[GENERATED SQL, attempt {attempt}]")
             print(query)
@@ -215,6 +295,17 @@ def sql_node(state: dict) -> dict:
         except Exception as error:
             last_query = query
             last_error = str(error)
+
+            bad = re.search(r"Invalid column name '([^']+)'", last_error)
+            if bad:
+                last_error += (
+                    f"\nThe name '{bad.group(1)}' is not a column in any table. "
+                    "If it is an alias you defined, repeat the full expression "
+                    "instead of the alias in WHERE or GROUP BY. If it is a "
+                    "measure, calculate it from the real columns using the "
+                    "MEASURE DEFINITIONS."
+                )
+
             print(f"\n[SQL ATTEMPT {attempt} FAILED] {error}")
 
     return {
@@ -268,7 +359,16 @@ RULES:
 15. Do not modify the original df unnecessarily.
 16. Use df.copy() when additional transformations are needed.
 17. Your entire reply must be executable Python. The first character of your reply must be code. No sentences, no explanation, no markdown.
-
+18. The SQL query has already applied every filter, grouping, sorting and
+    join requested in the question. Never filter rows again by a value from
+    the question (such as a country or product name). If no additional
+    calculation is needed, use: result = df.copy()
+19. For a question that asks ONLY "how many" or for a count, return a small
+    summary DataFrame (one row per category with its count, or one row for a
+    single number). If the question also asks to show or list the rows, keep
+    the rows and do not replace them with counts. Never add a column that
+    holds the same value in every row.
+    
 REQUEST MODE: {request_mode}
 
 MODE-SPECIFIC INSTRUCTIONS:
@@ -371,6 +471,9 @@ RULES:
     Never return the full df unless the user explicitly asks for all rows.
 24. For "within each group" questions, use groupby().rank() and filter
     on the rank instead of returning every row.
+25. Name a percentage column after the measure it is a share of, for
+    example share_of_total_quantity_pct.
+26. Never add a column that holds the same value in every row.
 
 ANALYSIS APPROACH:
 
@@ -461,12 +564,9 @@ def python_node(state: dict) -> dict:
         if df is None:
             raise ValueError("No SQL result available for Python processing.")
 
-        if (
-            state.get("request_mode") == "full_results"
-            and not state.get("analysis_required", False)
-        ):
+        if not state.get("analysis_required", False):
 
-            print("\n[PYTHON SKIPPED] Raw-row request: using the SQL result as is.")
+            print("\n[PYTHON SKIPPED] No calculation needed: using the SQL result as is.")
             return {
                 "python_code": "",
                 "python_result": df.copy(),
@@ -477,6 +577,7 @@ def python_node(state: dict) -> dict:
 
         for attempt in range(1, 4):
             code = None
+
             try:
                 code = generate_python_code(
                     question=state["question"],
@@ -492,6 +593,25 @@ def python_node(state: dict) -> dict:
                     raise RuntimeError(error)
                 if not isinstance(result_df, pd.DataFrame):
                     raise TypeError("Result must be a Pandas DataFrame.")
+                
+                if len(result_df) > 1:
+                    constant = [
+                        c for c in result_df.columns
+                        if c not in df.columns
+                        and result_df[c].nunique(dropna=False) == 1
+                    ]
+                    if constant:
+                        raise RuntimeError(
+                            f"Column(s) {constant} hold the same value in every row. "
+                            "Remove them and keep the original rows and columns."
+                        )
+                if result_df.empty and not df.empty:
+                    raise RuntimeError(
+                        f"The code returned 0 rows from {len(df)} input rows. "
+                        "The SQL query already applied every filter in the "
+                        "question, so do not filter rows again. Return the "
+                        "rows unchanged unless a calculation is requested."
+                    )
                 break
 
             except Exception as e:
@@ -606,109 +726,297 @@ def route_after_python(state: dict) -> str:
 
     return "final_response_node"
 
-def summarize_for_llm(df: pd.DataFrame, head_rows: int = 25, tail_rows: int = 5) -> str:
-    parts = [
-        f"Total rows: {len(df)}",
-        f"Columns: {list(df.columns)}",
+# def summarize_for_llm(df: pd.DataFrame, head_rows: int = 25, tail_rows: int = 5) -> str:
+#     parts = [
+#         f"Total rows: {len(df)}",
+#         f"Columns: {list(df.columns)}",
+#     ]
+ 
+#     numeric = df.select_dtypes("number")
+#     if not numeric.empty:
+#         parts.append("Numeric summary (all rows):\n" + numeric.describe().round(2).to_string())
+ 
+#     if len(df) <= head_rows + tail_rows:
+#         parts.append("All rows:\n" + df.to_string(index=False))
+#     else:
+#         parts.append(f"First {head_rows} rows:\n" + df.head(head_rows).to_string(index=False))
+#         parts.append(f"Last {tail_rows} rows:\n" + df.tail(tail_rows).to_string(index=False))
+ 
+#     return "\n\n".join(parts)
+
+# ------------------------------------------------------------------
+
+# Identifier-like columns: statistics on them are meaningless
+ID_COLUMN = re.compile(r"(?i)(^|_)(key|code|id|number|rank|row_num)$")
+
+# Columns that must not be added up (percentages, averages, ratios)
+NON_ADDITIVE = re.compile(r"(?i)percent|pct|share|ratio|margin|average|avg|rate|mean|median")
+
+
+def fmt_value(value) -> str:
+    """Format a value for the prompt: thousands separators, at most 2 decimals."""
+    if pd.isna(value):
+        return "none"
+    if pd.api.types.is_number(value) and not isinstance(value, bool):
+        number = float(value)
+        return f"{int(number):,}" if number.is_integer() else f"{number:,.2f}"
+    return str(value)
+
+
+def build_facts(df: pd.DataFrame, max_measures: int = 3) -> str:
+    """Facts computed over ALL rows, so the LLM never counts, adds or compares."""
+
+    lines = [
+        f"Rows: {len(df)}",
+        f"Columns: {', '.join(str(c) for c in df.columns)}",
     ]
- 
-    numeric = df.select_dtypes("number")
-    if not numeric.empty:
-        parts.append("Numeric summary (all rows):\n" + numeric.describe().round(2).to_string())
- 
-    if len(df) <= head_rows + tail_rows:
-        parts.append("All rows:\n" + df.to_string(index=False))
+
+    number_cols = list(df.select_dtypes("number").columns)
+    measure_cols = [c for c in number_cols if not ID_COLUMN.search(str(c))]
+    text_cols = [c for c in df.columns if c not in number_cols]
+
+    # A readable name for every row (for example "France" or "Tents / Web")
+    if text_cols:
+        labels = df[text_cols].astype(str).agg(" / ".join, axis=1)
     else:
-        parts.append(f"First {head_rows} rows:\n" + df.head(head_rows).to_string(index=False))
-        parts.append(f"Last {tail_rows} rows:\n" + df.tail(tail_rows).to_string(index=False))
- 
-    return "\n\n".join(parts)
+        labels = pd.Series(df.index.astype(str), index=df.index)
+
+    # Highest, lowest, total and top-3 share for each measure
+    for col in measure_cols[:max_measures]:
+        if df[col].nunique(dropna=True) == 1:
+            lines.append(
+                f"{col}: every row has the same value = "
+                f"{fmt_value(df[col].dropna().iloc[0])}"
+            )
+            continue
+        tmp = pd.DataFrame({"label": labels, "value": df[col]}).dropna(subset=["value"])
+        if tmp.empty:
+            continue
+
+        tmp = tmp.sort_values("value", ascending=False)
+
+        highest = ", ".join(
+            f"{row.label} ({fmt_value(row.value)})" for row in tmp.head(3).itertuples()
+        )
+        lowest = ", ".join(
+            f"{row.label} ({fmt_value(row.value)})"
+            for row in tmp.tail(3).iloc[::-1].itertuples()
+        )
+        lines.append(f"{col}: highest three = {highest}")
+        lines.append(f"{col}: lowest three = {lowest}")
+
+        if not NON_ADDITIVE.search(str(col)):
+            total = tmp["value"].sum()
+            lines.append(f"{col}: total = {fmt_value(total)}")
+            if total and len(tmp) > 3:
+                share = tmp["value"].head(3).sum() / total * 100
+                lines.append(f"{col}: the top three together are {share:.2f}% of the total")
+
+    # Counts for small category columns (for example retailer type)
+    n_rows = len(df)
+
+    def describe_counts(series) -> str:
+        return ", ".join(
+            f"{name} = {count} ({count / n_rows * 100:.2f}%)"
+            for name, count in series.items()
+        )
+
+    for col in text_cols:
+        distinct = df[col].nunique()
+        if 1 < distinct <= 15 and distinct < n_rows:
+            counts = df[col].value_counts()
+
+            if distinct <= 8:
+                lines.append(
+                    f"{col}: {distinct} distinct values, all listed: "
+                    f"{describe_counts(counts)}"
+                )
+            else:
+                lines.append(
+                    f"{col}: {distinct} distinct values. "
+                    f"Most frequent five: {describe_counts(counts.head(5))}"
+                )
+                lines.append(
+                    f"{col}: least frequent two (smallest first): "
+                    f"{describe_counts(counts.tail(2).iloc[::-1])}"
+                )
+    return "\n".join(lines)
 
 def final_response_node(state: dict) -> dict:
-    """Generate a natural-language response using the processed DataFrame."""
- 
+    """Generate a short insights-only answer from facts computed in Python."""
+
+    error = state.get("error")
+    if error and str(error).startswith("UNSUPPORTED:"):
+        reason = str(error).split(":", 1)[1].strip()
+        return {
+            "final_response": (
+                "I can't answer that from the available data. "
+                f"{reason} "
+                "If you want an estimate, include your own assumption in "
+                "the question, for example: \"assume cost is 60% of revenue\"."
+            ),
+            "error": None,
+        }
+
     try:
         question = state["question"]
- 
+
         if state.get("error"):
             return {
                 "final_response": (
                     "I couldn't complete that request. "
-                    f"Details: {state['error']}"
+                    "The technical details are shown below."
                 )
             }
- 
+
         analysis_df = state.get("analysis_result")
- 
+
         if analysis_df is not None:
             df = analysis_df
             data_source = "Analysis Result (computed from the full dataset)"
         else:
             df = state.get("python_result")
             data_source = "Processed Data"
- 
+
         if df is None:
             return {"final_response": "No processed data is available."}
- 
+
+        # No data: answer without calling the LLM
+        if df.empty or df.isna().to_numpy().all():
+            return {
+                "final_response": "No records were found for this request.",
+                "error": None,
+            }
+
         total_rows = len(df)
-        is_preview = total_rows > 50
- 
-        if is_preview:
-            data_preview = summarize_for_llm(df)
-            preview_note = (
-                f"The data has {total_rows} rows. Only a summary and a preview "
-                "are shown below. Base conclusions on the summary statistics and "
-                "the rows shown, and say clearly that you are describing a preview "
-                "of a larger result. Do not claim anything about rows you cannot see."
+
+        facts = build_facts(df) or "No additional facts."
+        data_preview = "FACTS (computed by the application over all rows):\n" + facts
+
+        if total_rows <= 10:
+            data_preview += "\n\nALL ROWS:\n" + df.round(2).to_string(index=False)
+
+        fact_note = (
+            f"The result has {total_rows} rows. The FACTS below were computed by "
+            "the application over all of them. Use the FACTS for every highest, "
+            "lowest, total, count and combined share. Never count, add up or "
+            "compare values yourself."
+        )
+
+        if state.get("request_mode") == "full_results":
+            style_note = (
+                "The user asked to see the rows. The application shows the "
+                "table, so write only 1 or 2 key insights and do not mention "
+                "where the table is. If the FACTS contain nothing beyond the "
+                "row count, write one sentence only."
             )
         else:
-            data_preview = df.to_string(index=False)
-            preview_note = "The complete result is shown below."
- 
+            style_note = ""
+
+        if total_rows == 1:
+            style_note = (
+                "The result is a single row. Answer in one sentence that "
+                "states the value, and add nothing else."
+            )
+
         system_prompt = """
         You are a data analysis assistant.
- 
-        Answer the user's question using only the processed data provided.
- 
-        Strict instructions:
-        - Start with the direct answer to the question, then support it.
-        - Use only values available in the processed data.
-        - Never invent, estimate, or modify numerical values.
-        - Do not add currency symbols such as $, ₹, or €.
-        - Display numerical values as plain numbers.
-        - Name specific items (products, countries, retailers) in your answer.
+
+        The user already sees the full result table in a Results panel
+        under your answer, so never repeat it.
+
+        Write insights only:
+        - Start with one sentence that directly answers the question.
+        - Then give 2 to 4 short findings based on the FACTS: the leaders,
+          the lowest, the gap or concentration.
+        - Start each finding on a new line with a dash.
+        - Plain text only: no Markdown headings, bold text or tables.
+        - Never write a table or a row-by-row list.
+        - Use only the FACTS and the rows shown. Never invent, estimate,
+          count, add up or re-sort values.
+        - Only state what the data shows. Do not guess reasons and do not
+          comment on key, code or ID columns.
+        - Round numbers to at most 2 decimals and use thousands separators
+          (for example 15,722,077 and 17.62%).
+        - When numbers are quantities, call them "sales quantity" or "units",
+          never just "sales". If you give a percentage, say what it is a
+          share of (for example "share of total quantity").
+        - Do not add currency symbols such as $, ₹ or €.
         - Never reply with only a record count. Always state findings.
-        - Highlight important findings where relevant.
-        - If the result is empty, clearly mention that no records were found.
+        - If the result is empty, write one sentence only.
         - Do not generate SQL or Python code.
+        - Only if the question itself uses the word "customer" or "customers":
+          answer using retailers and note in one short sentence that
+          customers are represented by retailers. Otherwise never mention
+          customers.
+        - "Purchases" means revenue (quantity times unit sale price).
+        - If the question gave an assumption value (such as a tax rate or
+          cost percentage), restate it in one short sentence.
+        - State how many distinct values or categories exist only if the
+          FACTS give that number.
+        - Call an item "least common" or "lowest" only if the FACTS label
+          it that way.
+        - Use the percentages given in the FACTS. Never calculate your own.
+        - Never say that all rows are listed in the table. Say how many rows
+          the result contains (for example "The result contains 556 retailers").
+        - Refer to the data in business terms (for example "retailers"),
+          not "rows" or "columns". Never quote a column name such as
+          retailer_type_count.
         """
- 
+
         human_prompt = f"""
         User Question:
         {question}
- 
+
         Data Source:
         {data_source}
- 
-        {preview_note}
- 
-        Processed Data:
+
+        {fact_note}
+
+        {style_note}
+
         {data_preview}
- 
-        Number of records: {total_rows}
- 
-        Based on the processed data, provide the final response.
+
+        Based on the facts, provide the final response.
         """
- 
+
         response = llm.invoke([
             SystemMessage(content=system_prompt),
             HumanMessage(content=human_prompt),
         ])
- 
-        return {"final_response": response.content, "error": None}
- 
+
+        text = response.content
+
+        # Safety net: remove any Markdown table lines the model wrote anyway
+        text = re.sub(r"(?m)^[ \t]*\|.*\|[ \t]*\r?\n?", "", text).strip()
+
+        if not text:
+            text = "The results are shown in the table below."
+
+        notes = []
+
+        if state.get("request_mode") == "full_results":
+            notes.append("The full table is listed in the Results panel below.")
+
+        if total_rows > DISPLAY_ROWS:
+            notes.append(
+                f"Showing the first {DISPLAY_ROWS} of {total_rows} rows. "
+                "Use the download link under the table to get all rows."
+            )
+
+        if notes:
+            text = text + "\n\n" + " ".join(notes)
+
+        return {"final_response": text, "error": None}
+
     except Exception as e:
-        return {"final_response": "", "error": str(e)}
+        return {
+            "final_response": (
+                "I couldn't complete that request. "
+                "The technical details are shown below."
+            ),
+            "error": str(e),
+        }
 
 
 

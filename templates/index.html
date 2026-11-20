@@ -23,16 +23,10 @@
             <button type="submit" class="new-chat-btn"><span>+</span>New chat</button>
         </form>
 
-        <div class="sidebar-section">
-            <p class="sidebar-label">Workspace</p>
-            <div class="sidebar-item active"><span>▤</span>Sales Data Assistant</div>
-        </div>
-
         <div class="sidebar-footer">
             <div class="profile-icon">DA</div>
             <div>
                 <p class="profile-name">Data Assistant</p>
-                <p class="profile-status">Powered by LangGraph</p>
             </div>
         </div>
     </aside>
@@ -45,7 +39,6 @@
                 <h3>Sales Data Assistant</h3>
                 <p>Ask questions about your GoSalesDW database</p>
             </div>
-            <div class="connection-status"><span class="status-dot"></span>SQL Server connected</div>
         </header>
 
         <section class="chat-area" id="chatArea" aria-label="Conversation">
@@ -54,22 +47,6 @@
             <div class="welcome-screen">
                 <h1>What would you like to know about your sales?</h1>
                 <p>Ask in plain English. The assistant writes the SQL, runs it, and explains the result.</p>
-
-                <div class="suggestion-grid">
-                    {% for title, q in [
-                        ("Sales analysis", "Analyze total sales across product categories."),
-                        ("Customer insights", "Identify customers with the highest purchases."),
-                        ("Quarterly trends", "Compare sales performance across quarters."),
-                        ("Product performance", "Find the best-performing products.")
-                    ] %}
-                    <form action="{{ url_for('home') }}" method="POST" class="js-ask">
-                        <button type="submit" name="question" value="{{ q }}" class="suggestion-card">
-                            <h4>{{ title }}</h4>
-                            <p>{{ q }}</p>
-                        </button>
-                    </form>
-                    {% endfor %}
-                </div>
             </div>
 
             {% else %}
@@ -137,6 +114,14 @@
                                 </div>
                                 {% if message.row_count > message.rows|length %}
                                 <p class="table-note">Showing the first {{ message.rows|length }} of {{ message.row_count }} rows.</p>
+                                {% endif %}
+
+                                {% if message.downloads %}
+                                <div class="download-row">
+                                    {% for d in message.downloads %}
+                                    <a class="download-link" href="{{ url_for('download', file_id=d.id) }}">{{ d.label }}</a>
+                                    {% endfor %}
+                                </div>
                                 {% endif %}
                             </details>
                             {% endif %}

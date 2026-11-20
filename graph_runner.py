@@ -28,6 +28,11 @@ and SQL alone can answer it (a list, a group-by total, "top N by X" where N
 is stated). 
 Both can be true: when the user asks to see rows AND wants a computation or insight on them.
 
+Counting rows or distinct values ("how many retailers", "how many types")
+is NOT analysis: the application counts these itself. Set needs_analysis
+to false for such questions unless they also ask for ranking, percentages,
+comparisons or another calculation.
+
 Examples:
 "Show total revenue by product line" -> {"wants_raw_rows": true, "needs_analysis": false}
 "List all customers" -> {"wants_raw_rows": true, "needs_analysis": false}
@@ -37,6 +42,8 @@ Examples:
 "Which product and order method combinations perform worst?" -> {"wants_raw_rows": false, "needs_analysis": true}
 "What share of revenue comes from the top 20 customers?" -> {"wants_raw_rows": false, "needs_analysis": true}
 "List all customers and identify the top 10 by purchases" -> {"wants_raw_rows": true, "needs_analysis": true}
+"Show retailers in Canada and tell how many types are there" -> {"wants_raw_rows": true, "needs_analysis": false}
+"How many retailer types are there in Canada?" -> {"wants_raw_rows": false, "needs_analysis": false}
 """
 
 _ANALYSIS_RE = re.compile(
@@ -57,7 +64,7 @@ _RAW_RE = re.compile(
 def _keyword_fallback(question: str) -> dict:
     """Used only if the LLM classifier fails."""
     needs_analysis = bool(_ANALYSIS_RE.search(question))
-    wants_raw_rows = bool(data.get("wants_raw_rows", False))
+    wants_raw_rows = bool(_RAW_RE.search(question))
     return {"wants_raw_rows": wants_raw_rows, "needs_analysis": needs_analysis}
 
 

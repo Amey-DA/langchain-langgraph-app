@@ -216,12 +216,59 @@ button, input { font-family: inherit; }
 .message-timestamp { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
 .message-meta .message-timestamp { margin: 0; }
 
-.assistant-response {
+/* .assistant-response {
     font-size: 14.5px; line-height: 1.75;
     max-width: 70ch;
     white-space: pre-wrap; overflow-wrap: anywhere;
+} */
+
+/* 
+TRIAL CODE
+*/
+.assistant-response {
+    font-size: 14.5px;
+    line-height: 1.7;
+    max-width: 70ch;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
+.assistant-response p {
+    margin: 0 0 10px;
+}
+
+.assistant-response p:last-child {
+    margin-bottom: 0;
+}
+
+.assistant-response strong {
+    color: #ffffff;
+    font-weight: 600;
+}
+
+.assistant-response ul,
+.assistant-response ol {
+    margin: 8px 0 12px;
+    padding-left: 20px;
+}
+
+.assistant-response li {
+    margin-bottom: 6px;
+}
+
+.assistant-response li::marker {
+    color: var(--accent);
+}
+
+.assistant-response h3,
+.assistant-response h4 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent);
+    margin: 14px 0 6px;
+}
+
+/* ------------------------------------------------ */
 /* Metadata chips */
 .response-metadata { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .chip {

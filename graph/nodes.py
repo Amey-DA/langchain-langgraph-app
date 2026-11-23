@@ -5,7 +5,7 @@ from decimal import Decimal
 
 import pandas as pd
 
-from app import llm, get_relevant_schema, get_sql_connection, BUSINESS_RULES_TEXT
+from app import llm, get_relevant_schema, get_sql_connection, BUSINESS_RULES_TEXT, VALUE_HINTS
 from langchain_core.messages import HumanMessage, SystemMessage
 from app import run_python_on_dataframe
 
@@ -150,6 +150,8 @@ def generate_sql(
     - "purchases" and "spend" mean revenue unless the user mentions quantity.
     - "sales", "sales amount" and "total sales" mean revenue. "units sold" and "volume" mean quantity.
 
+    KNOWN VALUES (use these exact spellings in filters):
+    {VALUE_HINTS}
     {analysis_block}
 
     {retry_block}
@@ -162,6 +164,7 @@ def generate_sql(
         SystemMessage(content=system_prompt),
         HumanMessage(content=question)
     ])
+    print("[TOKENS sql]", getattr(response, "usage_metadata", None))
 
     return response.content.strip()
 
@@ -763,6 +766,265 @@ def fmt_value(value) -> str:
     return str(value)
 
 
+# def build_facts(df: pd.DataFrame, max_measures: int = 3) -> str:
+#     """Facts computed over ALL rows, so the LLM never counts, adds or compares."""
+
+#     lines = [
+#         f"Rows: {len(df)}",
+#         f"Columns: {', '.join(str(c) for c in df.columns)}",
+#     ]
+
+#     number_cols = list(df.select_dtypes("number").columns)
+#     measure_cols = [c for c in number_cols if not ID_COLUMN.search(str(c))]
+#     text_cols = [c for c in df.columns if c not in number_cols]
+
+#     # A readable name for every row (for example "France" or "Tents / Web")
+#     if text_cols:
+#         labels = df[text_cols].astype(str).agg(" / ".join, axis=1)
+#     else:
+#         labels = pd.Series(df.index.astype(str), index=df.index)
+
+#     # Highest, lowest, total and top-3 share for each measure
+#     for col in measure_cols[:max_measures]:
+#         if df[col].nunique(dropna=True) == 1:
+#             lines.append(
+#                 f"{col}: every row has the same value = "
+#                 f"{fmt_value(df[col].dropna().iloc[0])}"
+#             )
+#             continue
+#         tmp = pd.DataFrame({"label": labels, "value": df[col]}).dropna(subset=["value"])
+#         if tmp.empty:
+#             continue
+
+#         tmp = tmp.sort_values("value", ascending=False)
+
+#         highest = ", ".join(
+#             f"{row.label} ({fmt_value(row.value)})" for row in tmp.head(3).itertuples()
+#         )
+#         lowest = ", ".join(
+#             f"{row.label} ({fmt_value(row.value)})"
+#             for row in tmp.tail(3).iloc[::-1].itertuples()
+#         )
+#         lines.append(f"{col}: highest three = {highest}")
+#         lines.append(f"{col}: lowest three = {lowest}")
+
+#         if not NON_ADDITIVE.search(str(col)):
+#             total = tmp["value"].sum()
+#             lines.append(f"{col}: total = {fmt_value(total)}")
+#             if total and len(tmp) > 3:
+#                 share = tmp["value"].head(3).sum() / total * 100
+#                 lines.append(f"{col}: the top three together are {share:.2f}% of the total")
+
+#     # Counts for small category columns (for example retailer type)
+#     n_rows = len(df)
+
+#     def describe_counts(series) -> str:
+#         return ", ".join(
+#             f"{name} = {count} ({count / n_rows * 100:.2f}%)"
+#             for name, count in series.items()
+#         )
+
+#     for col in text_cols:
+#         distinct = df[col].nunique()
+#         if 1 < distinct <= 15 and distinct < n_rows:
+#             counts = df[col].value_counts()
+
+#             if distinct <= 8:
+#                 lines.append(
+#                     f"{col}: {distinct} distinct values, all listed: "
+#                     f"{describe_counts(counts)}"
+#                 )
+#             else:
+#                 lines.append(
+#                     f"{col}: {distinct} distinct values. "
+#                     f"Most frequent five: {describe_counts(counts.head(5))}"
+#                 )
+#                 lines.append(
+#                     f"{col}: least frequent two (smallest first): "
+#                     f"{describe_counts(counts.tail(2).iloc[::-1])}"
+#                 )
+#     return "\n".join(lines)
+
+# def final_response_node(state: dict) -> dict:
+#     """Generate a short insights-only answer from facts computed in Python."""
+
+#     error = state.get("error")
+#     if error and str(error).startswith("UNSUPPORTED:"):
+#         reason = str(error).split(":", 1)[1].strip()
+#         return {
+#             "final_response": (
+#                 "I can't answer that from the available data. "
+#                 f"{reason} "
+#                 "If you want an estimate, include your own assumption in "
+#                 "the question, for example: \"assume cost is 60% of revenue\"."
+#             ),
+#             "error": None,
+#         }
+
+#     try:
+#         question = state["question"]
+
+#         if state.get("error"):
+#             return {
+#                 "final_response": (
+#                     "I couldn't complete that request. "
+#                     "The technical details are shown below."
+#                 )
+#             }
+
+#         analysis_df = state.get("analysis_result")
+
+#         if analysis_df is not None:
+#             df = analysis_df
+#             data_source = "Analysis Result (computed from the full dataset)"
+#         else:
+#             df = state.get("python_result")
+#             data_source = "Processed Data"
+
+#         if df is None:
+#             return {"final_response": "No processed data is available."}
+
+#         # No data: answer without calling the LLM
+#         if df.empty or df.isna().to_numpy().all():
+#             return {
+#                 "final_response": "No records were found for this request.",
+#                 "error": None,
+#             }
+
+#         total_rows = len(df)
+
+#         facts = build_facts(df) or "No additional facts."
+#         data_preview = "FACTS (computed by the application over all rows):\n" + facts
+
+#         if total_rows <= 50:
+#             data_preview += "\n\nALL ROWS:\n" + df.round(2).to_string(index=False)
+
+#         fact_note = (
+#             f"The result has {total_rows} rows. The FACTS below were computed by "
+#             "the application over all of them. Use the FACTS for every highest, "
+#             "lowest, total, count and combined share. Never count, add up or "
+#             "compare values yourself."
+#         )
+
+#         if state.get("request_mode") == "full_results":
+#             style_note = (
+#                 "The user asked to see the rows. The application shows the "
+#                 "table, so write only 1 or 2 key insights and do not mention "
+#                 "where the table is. If the FACTS contain nothing beyond the "
+#                 "row count, write one sentence only."
+#             )
+#         else:
+#             style_note = ""
+
+#         if total_rows == 1:
+#             style_note = (
+#                 "The result is a single row. Answer in one sentence that "
+#                 "states the value, and add nothing else."
+#             )
+
+#         system_prompt = """
+#         You are a data analysis assistant.
+
+#         The user already sees the full result table in a Results panel
+#         under your answer, so never repeat it.
+
+#         Write insights only:
+#         - Start with one sentence that directly answers the question.
+#         - Then give 2 to 4 short findings based on the FACTS: the leaders,
+#           the lowest, the gap or concentration.
+#         - Start each finding on a new line with a dash.
+#         - Plain text only: no Markdown headings, bold text or tables.
+#         - Never write a table or a row-by-row list.
+#         - Use only the FACTS and the rows shown. Never invent, estimate,
+#           count, add up or re-sort values.
+#         - Only state what the data shows. Do not guess reasons and do not
+#           comment on key, code or ID columns.
+#         - Round numbers to at most 2 decimals and use thousands separators
+#           (for example 15,722,077 and 17.62%).
+#         - When numbers are quantities, call them "sales quantity" or "units",
+#           never just "sales". If you give a percentage, say what it is a
+#           share of (for example "share of total quantity").
+#         - Do not add currency symbols such as $, ₹ or €.
+#         - Never reply with only a record count. Always state findings.
+#         - If the result is empty, write one sentence only.
+#         - Do not generate SQL or Python code.
+#         - Only if the question itself uses the word "customer" or "customers":
+#           answer using retailers and note in one short sentence that
+#           customers are represented by retailers. Otherwise never mention
+#           customers.
+#         - "Purchases" means revenue (quantity times unit sale price).
+#         - If the question gave an assumption value (such as a tax rate or
+#           cost percentage), restate it in one short sentence.
+#         - State how many distinct values or categories exist only if the
+#           FACTS give that number.
+#         - Call an item "least common" or "lowest" only if the FACTS label
+#           it that way.
+#         - Use the percentages given in the FACTS. Never calculate your own.
+#         - Never say that all rows are listed in the table. Say how many rows
+#           the result contains (for example "The result contains 556 retailers").
+#         - Refer to the data in business terms (for example "retailers"),
+#           not "rows" or "columns". Never quote a column name such as
+#           retailer_type_count.
+#         """
+
+#         human_prompt = f"""
+#         User Question:
+#         {question}
+
+#         Data Source:
+#         {data_source}
+
+#         {fact_note}
+
+#         {style_note}
+
+#         {data_preview}
+
+#         Based on the facts, provide the final response.
+#         """
+
+#         response = llm.invoke([
+#             SystemMessage(content=system_prompt),
+#             HumanMessage(content=human_prompt),
+#         ])
+
+#         text = response.content
+
+#         # Safety net: remove any Markdown table lines the model wrote anyway
+#         text = re.sub(r"(?m)^[ \t]*\|.*\|[ \t]*\r?\n?", "", text).strip()
+
+#         if not text:
+#             text = "The results are shown in the table below."
+
+#         notes = []
+
+#         if state.get("request_mode") == "full_results":
+#             notes.append("The full table is listed in the Results panel below.")
+
+#         if total_rows > DISPLAY_ROWS:
+#             notes.append(
+#                 f"Showing the first {DISPLAY_ROWS} of {total_rows} rows. "
+#                 "Use the download link under the table to get all rows."
+#             )
+
+#         if notes:
+#             text = text + "\n\n" + " ".join(notes)
+
+#         return {"final_response": text, "error": None}
+
+#     except Exception as e:
+#         return {
+#             "final_response": (
+#                 "I couldn't complete that request. "
+#                 "The technical details are shown below."
+#             ),
+#             "error": str(e),
+#         }
+
+# -----------------------------------------------------------------------
+# TRIAL CODE
+# -----------------------------------------------------------------------
+
 def build_facts(df: pd.DataFrame, max_measures: int = 3) -> str:
     """Facts computed over ALL rows, so the LLM never counts, adds or compares."""
 
@@ -775,13 +1037,11 @@ def build_facts(df: pd.DataFrame, max_measures: int = 3) -> str:
     measure_cols = [c for c in number_cols if not ID_COLUMN.search(str(c))]
     text_cols = [c for c in df.columns if c not in number_cols]
 
-    # A readable name for every row (for example "France" or "Tents / Web")
     if text_cols:
         labels = df[text_cols].astype(str).agg(" / ".join, axis=1)
     else:
         labels = pd.Series(df.index.astype(str), index=df.index)
 
-    # Highest, lowest, total and top-3 share for each measure
     for col in measure_cols[:max_measures]:
         if df[col].nunique(dropna=True) == 1:
             lines.append(
@@ -789,30 +1049,59 @@ def build_facts(df: pd.DataFrame, max_measures: int = 3) -> str:
                 f"{fmt_value(df[col].dropna().iloc[0])}"
             )
             continue
+
         tmp = pd.DataFrame({"label": labels, "value": df[col]}).dropna(subset=["value"])
         if tmp.empty:
             continue
 
         tmp = tmp.sort_values("value", ascending=False)
+        is_additive = not NON_ADDITIVE.search(str(col))
+        total = tmp["value"].sum() if is_additive else None
+        can_share = is_additive and total and total > 0 and (tmp["value"] >= 0).all()
 
-        highest = ", ".join(
-            f"{row.label} ({fmt_value(row.value)})" for row in tmp.head(3).itertuples()
-        )
-        lowest = ", ".join(
-            f"{row.label} ({fmt_value(row.value)})"
-            for row in tmp.tail(3).iloc[::-1].itertuples()
-        )
+        def fmt_item(row) -> str:
+            if can_share:
+                pct = row.value / total * 100
+                return f"{row.label} ({fmt_value(row.value)}, {pct:.2f}%)"
+            return f"{row.label} ({fmt_value(row.value)})"
+
+        highest = ", ".join(fmt_item(r) for r in tmp.head(3).itertuples())
+        lowest = ", ".join(fmt_item(r) for r in tmp.tail(3).iloc[::-1].itertuples())
+
         lines.append(f"{col}: highest three = {highest}")
         lines.append(f"{col}: lowest three = {lowest}")
 
-        if not NON_ADDITIVE.search(str(col)):
-            total = tmp["value"].sum()
+        if is_additive:
             lines.append(f"{col}: total = {fmt_value(total)}")
-            if total and len(tmp) > 3:
-                share = tmp["value"].head(3).sum() / total * 100
-                lines.append(f"{col}: the top three together are {share:.2f}% of the total")
 
-    # Counts for small category columns (for example retailer type)
+        if len(tmp) >= 3:
+            mean_val = tmp["value"].mean()
+            median_val = tmp["value"].median()
+            above_mean = int((tmp["value"] > mean_val).sum())
+            lines.append(
+                f"{col}: average = {fmt_value(mean_val)}, median = {fmt_value(median_val)} "
+                f"({above_mean} of {len(tmp)} above average)"
+            )
+
+        top1 = tmp.iloc[0]
+        if len(tmp) >= 2 and tmp.iloc[1]["value"] > 0:
+            ratio_1_2 = top1["value"] / tmp.iloc[1]["value"]
+            lines.append(
+                f"{col}: {top1['label']} is {ratio_1_2:.2f}x second-place {tmp.iloc[1]['label']}"
+            )
+        if len(tmp) >= 2 and tmp.iloc[-1]["value"] > 0:
+            ratio_max_min = top1["value"] / tmp.iloc[-1]["value"]
+            lines.append(
+                f"{col}: {top1['label']} is {ratio_max_min:.2f}x lowest {tmp.iloc[-1]['label']}"
+            )
+
+        if can_share and len(tmp) > 3:
+            top3_share = tmp["value"].head(3).sum() / total * 100
+            bottom3_share = tmp["value"].tail(3).sum() / total * 100
+            lines.append(f"{col}: top three combined = {top3_share:.2f}% of total")
+            if len(tmp) > 6:
+                lines.append(f"{col}: bottom three combined = {bottom3_share:.2f}% of total")
+
     n_rows = len(df)
 
     def describe_counts(series) -> str:
@@ -825,11 +1114,9 @@ def build_facts(df: pd.DataFrame, max_measures: int = 3) -> str:
         distinct = df[col].nunique()
         if 1 < distinct <= 15 and distinct < n_rows:
             counts = df[col].value_counts()
-
             if distinct <= 8:
                 lines.append(
-                    f"{col}: {distinct} distinct values, all listed: "
-                    f"{describe_counts(counts)}"
+                    f"{col}: {distinct} distinct values, all listed: {describe_counts(counts)}"
                 )
             else:
                 lines.append(
@@ -840,10 +1127,12 @@ def build_facts(df: pd.DataFrame, max_measures: int = 3) -> str:
                     f"{col}: least frequent two (smallest first): "
                     f"{describe_counts(counts.tail(2).iloc[::-1])}"
                 )
+
     return "\n".join(lines)
 
+
 def final_response_node(state: dict) -> dict:
-    """Generate a short insights-only answer from facts computed in Python."""
+    """Generate a concise, formatted insights answer from facts computed in Python."""
 
     error = state.get("error")
     if error and str(error).startswith("UNSUPPORTED:"):
@@ -870,7 +1159,6 @@ def final_response_node(state: dict) -> dict:
             }
 
         analysis_df = state.get("analysis_result")
-
         if analysis_df is not None:
             df = analysis_df
             data_source = "Analysis Result (computed from the full dataset)"
@@ -881,7 +1169,6 @@ def final_response_node(state: dict) -> dict:
         if df is None:
             return {"final_response": "No processed data is available."}
 
-        # No data: answer without calling the LLM
         if df.empty or df.isna().to_numpy().all():
             return {
                 "final_response": "No records were found for this request.",
@@ -889,96 +1176,72 @@ def final_response_node(state: dict) -> dict:
             }
 
         total_rows = len(df)
-
         facts = build_facts(df) or "No additional facts."
         data_preview = "FACTS (computed by the application over all rows):\n" + facts
 
-        if total_rows <= 10:
+        if total_rows <= 25:
             data_preview += "\n\nALL ROWS:\n" + df.round(2).to_string(index=False)
 
         fact_note = (
-            f"The result has {total_rows} rows. The FACTS below were computed by "
-            "the application over all of them. Use the FACTS for every highest, "
-            "lowest, total, count and combined share. Never count, add up or "
-            "compare values yourself."
+            f"The result has {total_rows} rows. Use the pre-computed FACTS below for all "
+            "totals, shares, averages, ratios, highest/lowest items, and counts. "
+            "Never calculate, add up, or estimate numbers yourself."
         )
-
-        if state.get("request_mode") == "full_results":
-            style_note = (
-                "The user asked to see the rows. The application shows the "
-                "table, so write only 1 or 2 key insights and do not mention "
-                "where the table is. If the FACTS contain nothing beyond the "
-                "row count, write one sentence only."
-            )
-        else:
-            style_note = ""
 
         if total_rows == 1:
             style_note = (
-                "The result is a single row. Answer in one sentence that "
-                "states the value, and add nothing else."
+                "The result is a single row. Answer in one clear sentence stating the value."
+            )
+        elif state.get("request_mode") == "full_results":
+            style_note = (
+                "The user asked to see the full records. Write 1 or 2 brief key takeaways "
+                "without mentioning the Results panel or table."
+            )
+        else:
+            style_note = (
+                "Structure the response as:\n"
+                "1. One opening sentence that directly answers the question and naturally includes "
+                "the total and how many entities/items are covered (do NOT tack on 'The result contains X rows' at the end).\n"
+                "2. 3 to 4 bullet points (each starting with '- ') with bold lead-in labels highlighting: "
+                "the top leader and its gap/ratio vs. #2 or lowest, concentration/average context, and the lowest performers."
             )
 
         system_prompt = """
-        You are a data analysis assistant.
+You are a clear, concise business data analyst.
+The user already sees the full table below your answer, so never repeat it row by row.
 
-        The user already sees the full result table in a Results panel
-        under your answer, so never repeat it.
+Formatting (clean Markdown):
+- Start with one crisp summary sentence, bolding the headline total and scope (e.g., "Across **21 countries**, total sales quantity is **89,237,091 units**.").
+- Follow with 3 to 4 bullet points using "- " with bold lead-in labels:
+  - **Top performer:** ...
+  - **Concentration & spread:** ...
+  - **Lowest performers:** ...
+- Bold key entity names and headline numbers, without bolding entire sentences.
+- Never include Markdown tables or code fences (```).
 
-        Write insights only:
-        - Start with one sentence that directly answers the question.
-        - Then give 2 to 4 short findings based on the FACTS: the leaders,
-          the lowest, the gap or concentration.
-        - Start each finding on a new line with a dash.
-        - Plain text only: no Markdown headings, bold text or tables.
-        - Never write a table or a row-by-row list.
-        - Use only the FACTS and the rows shown. Never invent, estimate,
-          count, add up or re-sort values.
-        - Only state what the data shows. Do not guess reasons and do not
-          comment on key, code or ID columns.
-        - Round numbers to at most 2 decimals and use thousands separators
-          (for example 15,722,077 and 17.62%).
-        - When numbers are quantities, call them "sales quantity" or "units",
-          never just "sales". If you give a percentage, say what it is a
-          share of (for example "share of total quantity").
-        - Do not add currency symbols such as $, ₹ or €.
-        - Never reply with only a record count. Always state findings.
-        - If the result is empty, write one sentence only.
-        - Do not generate SQL or Python code.
-        - Only if the question itself uses the word "customer" or "customers":
-          answer using retailers and note in one short sentence that
-          customers are represented by retailers. Otherwise never mention
-          customers.
-        - "Purchases" means revenue (quantity times unit sale price).
-        - If the question gave an assumption value (such as a tax rate or
-          cost percentage), restate it in one short sentence.
-        - State how many distinct values or categories exist only if the
-          FACTS give that number.
-        - Call an item "least common" or "lowest" only if the FACTS label
-          it that way.
-        - Use the percentages given in the FACTS. Never calculate your own.
-        - Never say that all rows are listed in the table. Say how many rows
-          the result contains (for example "The result contains 556 retailers").
-        - Refer to the data in business terms (for example "retailers"),
-          not "rows" or "columns". Never quote a column name such as
-          retailer_type_count.
+Grounding & Precision:
+- Use only the FACTS and rows provided. Never invent reasons, guess causes, or comment on key/code/ID columns.
+- Round numbers to at most 2 decimals with thousands separators (e.g., 15,722,077 and 17.62%).
+- Call quantities "sales quantity" or "units", never just "sales". State what every percentage is a share of.
+- Do not add currency symbols ($, ₹, €).
+- Refer to data in business terms (e.g., "countries", "retailers"), never "rows" or "columns", and never quote raw column names.
+- Only mention "customers" (noting they are represented by retailers) if the question itself uses the word "customer" or "customers".
+- If the question provided an assumption (such as a tax rate or cost percentage), restate it in one short sentence.
         """
 
         human_prompt = f"""
-        User Question:
-        {question}
+User Question:
+{question}
 
-        Data Source:
-        {data_source}
+Data Source:
+{data_source}
 
-        {fact_note}
+{fact_note}
 
-        {style_note}
+{style_note}
 
-        {data_preview}
-
-        Based on the facts, provide the final response.
-        """
+{data_preview}
+"""
 
         response = llm.invoke([
             SystemMessage(content=system_prompt),
@@ -994,10 +1257,6 @@ def final_response_node(state: dict) -> dict:
             text = "The results are shown in the table below."
 
         notes = []
-
-        if state.get("request_mode") == "full_results":
-            notes.append("The full table is listed in the Results panel below.")
-
         if total_rows > DISPLAY_ROWS:
             notes.append(
                 f"Showing the first {DISPLAY_ROWS} of {total_rows} rows. "
@@ -1017,7 +1276,3 @@ def final_response_node(state: dict) -> dict:
             ),
             "error": str(e),
         }
-
-
-
-

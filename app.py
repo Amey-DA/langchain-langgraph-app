@@ -110,6 +110,43 @@ def get_sql_connection():
     )
     return pyodbc.connect(connection_string, timeout=10)
 
+# ----------------------------------------------------------------------
+# VALUE HINT COLUMN
+# ----------------------------------------------------------------------
+
+VALUE_HINT_COLUMNS = [
+    ("DM_COUNTRY", "COUNTRY"),
+    ("DM_COUNTRY", "REGION"),
+    ("DM_ORDER_METHOD", "ORDER_METHOD"),
+    ("DM_PRODUCT", "PRODUCT_LINE"),
+    ("DM_RETAILER", "RETAILER_TYPE"),
+]
+
+
+def load_value_hints() -> str:
+    """Distinct values of small lookup columns, so filters use exact spellings."""
+
+    lines = []
+
+    try:
+        with closing(get_sql_connection()) as connection:
+            cursor = connection.cursor()
+
+            for table, column in VALUE_HINT_COLUMNS:
+                cursor.execute(f"SELECT DISTINCT {column} FROM dbo.{table}")
+                values = sorted(
+                    str(row[0]) for row in cursor.fetchall() if row[0] is not None
+                )[:50]
+                lines.append(f"- {table}.{column}: " + ", ".join(values))
+
+    except Exception as error:
+        print(f"[VALUE HINTS] Could not load: {error}")
+        return ""
+
+    return "\n".join(lines)
+
+VALUE_HINTS = load_value_hints()
+print(VALUE_HINTS)
 
 # --------------------------------------------------
 # 4. Application state and display helpers

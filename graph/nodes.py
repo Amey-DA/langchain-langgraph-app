@@ -69,9 +69,12 @@ def generate_sql(
 
     ANALYSIS FOLLOWS THIS QUERY:
     - Return ALL rows at the level the question asks for (for example,
-      one row per retailer or per product).
-    - Do NOT use TOP, ROW_NUMBER, RANK, window functions or percentage
-      calculations. Ranking and top-N selection happen in a later step.
+      one row per country or per product) with the measures needed.
+    - Do NOT compute rankings, top-N, percentages or running totals in SQL
+      (no TOP, ROW_NUMBER, RANK or other window functions). The application
+      does these in the next step from your rows.
+    - This is not a reason to refuse. A question about rank, top-N,
+      percentage or comparison is fully answerable: just return the rows.
     """
         
     if previous_error:
@@ -143,6 +146,9 @@ def generate_sql(
     - If the user gives a value (a tax rate, a discount, a cost
       percentage), use exactly that value. Never change it or add your own.
     - Never invent values, constants or placeholders to fill missing data.
+    - Use UNSUPPORTED only when the data itself does not exist in the
+      database (for example cost, tax or discount). Never use it for ranking,
+      percentages, top-N, averages or any other calculation.
 
     TERMINOLOGY:
     - "customer" and "customers" mean retailers (DM_RETAILER).
@@ -316,7 +322,6 @@ def sql_node(state: dict) -> dict:
         "sql_result": None,
         "error": f"The SQL query failed after 3 attempts. Last error: {last_error}"
     }
-
 
 def generate_python_code(
     question: str,

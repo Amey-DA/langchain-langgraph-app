@@ -1,5 +1,6 @@
 import re
 import ast
+import json
 from contextlib import closing
 from decimal import Decimal
 
@@ -8,6 +9,7 @@ import pandas as pd
 from app import llm, get_relevant_schema, get_sql_connection, BUSINESS_RULES_TEXT, VALUE_HINTS
 from langchain_core.messages import HumanMessage, SystemMessage
 from app import run_python_on_dataframe
+from llm_tracking import invoke_tracked
 
 DISPLAY_ROWS = 100  # keep equal to PREVIEW_ROWS in flask_app.py
 
@@ -48,131 +50,147 @@ def validate_python(code: str) -> None:
             f"Return ONLY executable Python code with no explanation."
         )
 
-def generate_sql(
+def generate_sql_plan(
     question: str,
-    previous_query: str | None = None,
+    previous_query: str = "",
     previous_error: str | None = None,
-    analysis_required: bool = False,
-) -> str:
-    """
-    Generate a SQL Server SELECT query using the user's
-    question and relevant database schema.
-    """
+) -> tuple[str, bool, str]:
+    """Classify the request and generate its SQL in one model call."""
 
     schema = get_relevant_schema(question)
 
-    retry_block = ""
-
-    analysis_block = ""
-    if analysis_required:
-        analysis_block = """
-
-    ANALYSIS FOLLOWS THIS QUERY:
-    - Return ALL rows at the level the question asks for (for example,
-      one row per country or per product) with the measures needed.
-    - Do NOT compute rankings, top-N, percentages or running totals in SQL
-      (no TOP, ROW_NUMBER, RANK or other window functions). The application
-      does these in the next step from your rows.
-    - This is not a reason to refuse. A question about rank, top-N,
-      percentage or comparison is fully answerable: just return the rows.
-    """
-        
-    if previous_error:
-        retry_block = f"""
-    PREVIOUS ATTEMPT FAILED.
-    Previous query:
-    {previous_query}
-
-    Database error:
-    {previous_error}
-
-    Fix the query. Use only column names that appear in the schema below.
-    """
-
     system_prompt = f"""
-    You are an expert SQL Server query generator.
+You plan analytics requests for the GoSales SQL Server database.
 
-    Generate a SQL Server (T-SQL) query based on the user's question.
+Return one valid JSON object with exactly these three fields:
 
-    Use only the tables and columns provided in the schema.
+- request_mode: either "full_results" or "analysis"
+- analysis_required: a JSON boolean, true or false
+- sql_query: a string containing the SQL or an unsupported-data reason
 
-    Rules:
-    1. Generate only SELECT queries.
-    2. Do not generate INSERT, UPDATE, DELETE, DROP or other
-       modification statements.
-    3. Use the provided relationships when joining tables.
-    4. Do not assume columns that are not present in the schema.
-    5. Return only the SQL query.
-    6. Do not include explanations or Markdown code fences.
-    7. Copy column names exactly as written in the schema. Never invent
-       names such as COUNTRY_NAME. The country name column is
-       DM_COUNTRY.COUNTRY and the region column is DM_COUNTRY.REGION.
+Return only JSON. Do not use Markdown fences or explanatory prose.
 
-    BUSINESS RULES:
-    - Retailer's home country (for questions about retailers, with no sales
-      measure): DM_RETAILER.RETAILER_COUNTRY_CODE = DM_COUNTRY.COUNTRY_CODE.
-      No fact table is needed for this.
-    - Country where a sale happened (for sales, quantity or revenue by
-      country): FCT_SALES.RETAILER_SITE_KEY = DM_RETAILER_SITE.RETAILER_SITE_KEY,
-      then DM_RETAILER_SITE.RETAILER_SITE_COUNTRY_CODE = DM_COUNTRY.COUNTRY_CODE.
-    - Never join FCT_SALES.RETAILER_KEY to DM_COUNTRY.
-    - Filter countries with DM_COUNTRY.COUNTRY (for example 'Canada').
-      Column COUNTRY_NAME does not exist.
-    - Unless the user mentions ship or close date, join DM_DATE using
-      ORDER_DAY_KEY.
-    - A retailer site has no name column. Identify a site with
-      DM_RETAILER_SITE.RETAILER_SITE_CODE and DM_RETAILER_SITE.RETAILER_SITE_CITY.
-      RETAILER_SITE_CONTACT_NAME is a contact person, not the site name.
-    - When you show a site, add its retailer name by joining DM_RETAILER
-      on FCT_SALES.RETAILER_KEY.
-    - These columns DO NOT EXIST: SALES, SALES_AMOUNT, REVENUE, AMOUNT,
-      TOTAL_SALES, PRICE, COST. Create such measures with an alias in
-      the SELECT.
-    - When the question asks how many types, categories or kinds of something,
-      include that category column in the SELECT (for example RETAILER_TYPE),
-      so the application can count the distinct values.
+REQUEST PLANNING
 
-    MEASURE DEFINITIONS (maintained by the business):
-    {BUSINESS_RULES_TEXT}
+1. Use request_mode="full_results" and analysis_required=false for:
+   - Listing records.
+   - Showing grouped totals, such as revenue by product line.
+   - A straightforward top N by one measure, such as the top 5 retailers
+     by revenue. Use TOP and ORDER BY in SQL for this case.
 
-    MEASURE RULES:
-    - Use a measure only as defined above. Create it with an alias in
-      the SELECT; do not use it as a column name.
-    - If the question needs a measure marked NOT AVAILABLE, and the user did
-      not give the needed value in the question, do not write SQL. Reply
-      with exactly one line:
-      UNSUPPORTED: <reason>. Give the value in your question, for example
-      "assume 18% tax" or "assume cost is 60% of revenue".
-    - If the user gives a value (a tax rate, a discount, a cost
-      percentage), use exactly that value. Never change it or add your own.
-    - Never invent values, constants or placeholders to fill missing data.
-    - Use UNSUPPORTED only when the data itself does not exist in the
-      database (for example cost, tax or discount). Never use it for ranking,
-      percentages, top-N, averages or any other calculation.
+2. Use request_mode="analysis" and analysis_required=false for a scalar
+   answer SQL can provide directly, such as total sales quantity or a count.
 
-    TERMINOLOGY:
-    - "customer" and "customers" mean retailers (DM_RETAILER).
-      There is no customer table.
-    - "purchases" and "spend" mean revenue unless the user mentions quantity.
-    - "sales", "sales amount" and "total sales" mean revenue. "units sold" and "volume" mean quantity.
+3. Use request_mode="analysis" and analysis_required=true when Pandas
+   needs to calculate something from the retrieved rows. Examples include
+   percentage contribution, growth, trends, outliers, comparisons between
+   groups, and ranking within each group.
 
-    KNOWN VALUES (use these exact spellings in filters):
-    {VALUE_HINTS}
-    {analysis_block}
+4. When analysis_required=true, return all eligible rows at the grain the
+   question needs, with the measures Pandas will use. Apply the user's
+   filters in SQL. Leave the ranking, percentages, and top-N selection
+   to Pandas.
 
-    {retry_block}
+   Example: For "calculate each retailer's percentage contribution and
+   identify the top 5", return revenue for EVERY eligible retailer.
+   Pandas needs the full denominator before selecting the top five.
 
-    DATABASE SCHEMA:
-    {schema}
-    """
+SQL RULES
 
-    response = llm.invoke([
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=question)
-    ])
-    print("[TOKENS sql]", getattr(response, "usage_metadata", None))
+- Generate one read-only T-SQL SELECT statement. A CTE starting with
+  WITH is allowed.
+- Use only the tables, columns, and relationships in the supplied schema.
+- Copy column names exactly. Never invent columns or use SQL comments.
+- Use the business definitions below to calculate measures.
 
-    return response.content.strip()
+GOSALES BUSINESS RULES
+
+- Retailer's home country: join DM_RETAILER.RETAILER_COUNTRY_CODE to
+  DM_COUNTRY.COUNTRY_CODE. A fact table is unnecessary for this lookup.
+- Country where a sale happened: join FCT_SALES.RETAILER_SITE_KEY to
+  DM_RETAILER_SITE.RETAILER_SITE_KEY, then join
+  DM_RETAILER_SITE.RETAILER_SITE_COUNTRY_CODE to DM_COUNTRY.COUNTRY_CODE.
+- Never join FCT_SALES.RETAILER_KEY to DM_COUNTRY.
+- Use DM_COUNTRY.COUNTRY for country names and DM_COUNTRY.REGION for
+  regions. COUNTRY_NAME does not exist.
+- Use ORDER_DAY_KEY when joining to DM_DATE unless the question asks
+  about ship date or close date.
+- Identify a retailer site using RETAILER_SITE_CODE and RETAILER_SITE_CITY.
+  RETAILER_SITE_CONTACT_NAME identifies a person. When showing sites with
+  sales, join DM_RETAILER through FCT_SALES.RETAILER_KEY for retailer names.
+- SALES, SALES_AMOUNT, REVENUE, AMOUNT, TOTAL_SALES, PRICE, and COST are
+  not source columns. Calculate supported measures and give them aliases.
+- When listing entities and reporting how many types or categories they
+  represent, include the category column needed for the distinct count.
+
+MEASURE DEFINITIONS
+
+{BUSINESS_RULES_TEXT}
+
+- Use measures as defined above.
+- When a required measure is unavailable and the user supplied no
+  assumption, set sql_query to "UNSUPPORTED: <specific reason>".
+  Keep that string inside the JSON object.
+- If the user supplies an assumption, use that exact value.
+- Never invent a cost, tax rate, discount, or placeholder.
+- Ranking, percentages, and averages are supported when their underlying
+  measures exist.
+
+TERMINOLOGY
+
+- "Customer" means retailer in DM_RETAILER.
+- "Purchases" and "spend" mean revenue unless quantity is specified.
+- "Sales", "sales amount", and "total sales" mean revenue.
+- "Units sold" and "volume" mean quantity.
+
+KNOWN VALUES FOR FILTERS
+
+{VALUE_HINTS}
+
+DATABASE SCHEMA
+
+{schema}
+
+If a previous attempt failed, use the supplied error to correct the plan.
+"""
+
+    user_input = {"question": question}
+
+    if previous_error:
+        user_input["previous_query"] = previous_query
+        user_input["previous_error"] = previous_error
+
+    response = invoke_tracked(
+        "plan_sql",
+        llm,
+        [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=json.dumps(user_input)),
+        ],
+    )
+
+    plan = json.loads(response.content)
+
+    if not isinstance(plan, dict):
+        raise ValueError("Return a JSON object containing the SQL plan.")
+
+    request_mode = plan.get("request_mode")
+    analysis_required = plan.get("analysis_required")
+    sql_query = plan.get("sql_query")
+
+    if request_mode not in ("analysis", "full_results"):
+        raise ValueError("request_mode must be 'analysis' or 'full_results'.")
+
+    if type(analysis_required) is not bool:
+        raise ValueError("analysis_required must be a JSON boolean.")
+
+    if analysis_required and request_mode != "analysis":
+        raise ValueError("Use analysis mode when analysis_required is true.")
+
+    if not isinstance(sql_query, str) or not sql_query.strip():
+        raise ValueError("sql_query must be a nonempty string.")
+
+    return request_mode, analysis_required, sql_query.strip()
 
 def execute_sql_query(query: str) -> pd.DataFrame:
     """
@@ -248,13 +266,9 @@ def clean_sql_query(query: str) -> str:
     return extract_code(query)
 
 def sql_node(state: dict) -> dict:
-    """
-    Generate SQL, execute it, and update the graph state.
-    Retries up to 3 times, passing the database error back to the LLM.
-    """
+    """Generate a plan, execute validated SQL, and update the graph state."""
 
     question = state["question"]
-
     last_query = ""
     last_error = None
 
@@ -262,65 +276,72 @@ def sql_node(state: dict) -> dict:
         query = ""
 
         try:
-            query = clean_sql_query(
-                generate_sql(
-                    question,
-                    last_query,
-                    last_error,
-                    state.get("analysis_required", False),
-                )
+            request_mode, analysis_required, query = generate_sql_plan(
+                question=question,
+                previous_query=last_query,
+                previous_error=last_error,
             )
 
-            if re.match(r"(?is)^\s*UNSUPP\w*\s*:", query):
+            print(
+                f"\n[PLAN] mode={request_mode}, "
+                f"analysis_required={analysis_required}"
+            )
+
+            if query.upper().startswith("UNSUPPORTED:"):
                 reason = query.split(":", 1)[1].strip()
-                print(f"\n[SQL UNSUPPORTED] {reason}")
+                print(f"[SQL UNSUPPORTED] {reason}")
+
                 return {
+                    "request_mode": request_mode,
+                    "analysis_required": analysis_required,
                     "sql_query": "",
                     "sql_result": None,
-                    "error": f"UNSUPPORTED: {reason}"
+                    "error": f"UNSUPPORTED: {reason}",
                 }
 
-            if not re.match(r"(?is)^\s*(SELECT|WITH)\b", query):
-                print(f"\n[SQL NOT A QUERY] {query[:200]}")
-                return {
-                    "sql_query": "",
-                    "sql_result": None,
-                    "error": f"UNSUPPORTED: {query[:200]}"
-                }
+            if not re.match(r"(?i)^(SELECT|WITH)\b", query):
+                raise ValueError(
+                    "sql_query must start with SELECT, WITH, or UNSUPPORTED:."
+                )
 
             print(f"\n[GENERATED SQL, attempt {attempt}]")
             print(query)
 
+            # This existing function validates the SQL before executing it.
             df = execute_sql_query(query)
 
-            print(f"\n[SQL SUCCESS] Retrieved {len(df)} rows.")
+            print(f"[SQL SUCCESS] Retrieved {len(df)} rows.")
 
             return {
+                "request_mode": request_mode,
+                "analysis_required": analysis_required,
                 "sql_query": query,
                 "sql_result": df,
-                "error": None
+                "error": None,
             }
 
         except Exception as error:
             last_query = query
             last_error = str(error)
 
-            bad = re.search(r"Invalid column name '([^']+)'", last_error)
-            if bad:
+            invalid_column = re.search(
+                r"Invalid column name '([^']+)'", last_error
+            )
+            if invalid_column:
+                column = invalid_column.group(1)
                 last_error += (
-                    f"\nThe name '{bad.group(1)}' is not a column in any table. "
-                    "If it is an alias you defined, repeat the full expression "
-                    "instead of the alias in WHERE or GROUP BY. If it is a "
-                    "measure, calculate it from the real columns using the "
-                    "MEASURE DEFINITIONS."
+                    f"\n'{column}' is not a source column. Check the schema. "
+                    "If it is a SELECT alias, repeat the expression where "
+                    "SQL Server requires it. If it is a measure, calculate "
+                    "it using the supplied measure definitions."
                 )
 
-            print(f"\n[SQL ATTEMPT {attempt} FAILED] {error}")
+            print(f"[PLAN/SQL ATTEMPT {attempt} FAILED] {error}")
 
     return {
         "sql_query": last_query,
         "sql_result": None,
-        "error": f"The SQL query failed after 3 attempts. Last error: {last_error}"
+        "error": f"The SQL plan failed after 3 attempts. Last error: {last_error}",
     }
 
 def generate_python_code(
@@ -410,7 +431,7 @@ If an error is shown, fix that specific problem.
 
 """
 
-    response = llm.invoke([
+    response = invoke_tracked("pandas", llm, [
         SystemMessage(content=system_prompt),
         HumanMessage(content=question)
     ])
@@ -509,7 +530,7 @@ If a previous execution error exists, correct the
 generated code to address that specific error.
 """
 
-    response = llm.invoke([
+    response = invoke_tracked("analysis", llm, [
         SystemMessage(content=system_prompt),
         HumanMessage(content=question)
     ])
@@ -1031,12 +1052,17 @@ def fmt_value(value) -> str:
 # -----------------------------------------------------------------------
 
 def build_facts(df: pd.DataFrame, max_measures: int = 3) -> str:
-    """Facts computed over ALL rows, so the LLM never counts, adds or compares."""
+    """Describe the rows in the final result passed to this function."""
 
+    n_rows = len(df)
     lines = [
-        f"Rows: {len(df)}",
+        f"Returned rows: {n_rows}",
         f"Columns: {', '.join(str(c) for c in df.columns)}",
+        "Scope: statistics below describe the returned result.",
     ]
+
+    if df.empty:
+        return "\n".join(lines)
 
     number_cols = list(df.select_dtypes("number").columns)
     measure_cols = [c for c in number_cols if not ID_COLUMN.search(str(c))]
@@ -1047,81 +1073,93 @@ def build_facts(df: pd.DataFrame, max_measures: int = 3) -> str:
     else:
         labels = pd.Series(df.index.astype(str), index=df.index)
 
-    for col in measure_cols[:max_measures]:
-        if df[col].nunique(dropna=True) == 1:
-            lines.append(
-                f"{col}: every row has the same value = "
-                f"{fmt_value(df[col].dropna().iloc[0])}"
-            )
-            continue
+    def fmt_item(row) -> str:
+        # Use the value already present in this column.
+        return f"{row.label} ({fmt_value(row.value)})"
 
-        tmp = pd.DataFrame({"label": labels, "value": df[col]}).dropna(subset=["value"])
+    for col in measure_cols[:max_measures]:
+        tmp = pd.DataFrame({
+            "label": labels,
+            "value": df[col],
+        }).dropna(subset=["value"])
+
         if tmp.empty:
             continue
 
+        if tmp["value"].nunique() == 1:
+            lines.append(
+                f"{col}: all {len(tmp)} non-null values equal "
+                f"{fmt_value(tmp['value'].iloc[0])}"
+            )
+            continue
+
         tmp = tmp.sort_values("value", ascending=False)
-        is_additive = not NON_ADDITIVE.search(str(col))
-        total = tmp["value"].sum() if is_additive else None
-        can_share = is_additive and total and total > 0 and (tmp["value"] >= 0).all()
+        count = len(tmp)
+        rank_count = min(3, count)
 
-        def fmt_item(row) -> str:
-            if can_share:
-                pct = row.value / total * 100
-                return f"{row.label} ({fmt_value(row.value)}, {pct:.2f}%)"
-            return f"{row.label} ({fmt_value(row.value)})"
+        highest = ", ".join(
+            fmt_item(row) for row in tmp.head(rank_count).itertuples()
+        )
+        lowest = ", ".join(
+            fmt_item(row)
+            for row in tmp.tail(rank_count).iloc[::-1].itertuples()
+        )
 
-        highest = ", ".join(fmt_item(r) for r in tmp.head(3).itertuples())
-        lowest = ", ".join(fmt_item(r) for r in tmp.tail(3).iloc[::-1].itertuples())
+        lines.append(f"{col}: highest {rank_count} in the result = {highest}")
+        lines.append(f"{col}: lowest {rank_count} in the result = {lowest}")
 
-        lines.append(f"{col}: highest three = {highest}")
-        lines.append(f"{col}: lowest three = {lowest}")
+        if not NON_ADDITIVE.search(str(col)):
+            total = tmp["value"].sum()
+            lines.append(
+                f"{col}: sum across {count} returned rows with a value "
+                f"= {fmt_value(total)}"
+            )
 
-        if is_additive:
-            lines.append(f"{col}: total = {fmt_value(total)}")
-
-        if len(tmp) >= 3:
+        if count >= 3:
             mean_val = tmp["value"].mean()
             median_val = tmp["value"].median()
             above_mean = int((tmp["value"] > mean_val).sum())
+
             lines.append(
-                f"{col}: average = {fmt_value(mean_val)}, median = {fmt_value(median_val)} "
-                f"({above_mean} of {len(tmp)} above average)"
+                f"{col}: average = {fmt_value(mean_val)}, "
+                f"median = {fmt_value(median_val)} "
+                f"({above_mean} of {count} above average)"
             )
 
-        top1 = tmp.iloc[0]
-        if len(tmp) >= 2 and tmp.iloc[1]["value"] > 0:
-            ratio_1_2 = top1["value"] / tmp.iloc[1]["value"]
+        first = tmp.iloc[0]
+        second = tmp.iloc[1]
+        last = tmp.iloc[-1]
+
+        if second["value"] > 0:
+            ratio = first["value"] / second["value"]
             lines.append(
-                f"{col}: {top1['label']} is {ratio_1_2:.2f}x second-place {tmp.iloc[1]['label']}"
+                f"{col}: {first['label']} is {ratio:.2f}x "
+                f"second-place {second['label']} in the result"
             )
-        if len(tmp) >= 2 and tmp.iloc[-1]["value"] > 0:
-            ratio_max_min = top1["value"] / tmp.iloc[-1]["value"]
+
+        if last["value"] > 0:
+            ratio = first["value"] / last["value"]
             lines.append(
-                f"{col}: {top1['label']} is {ratio_max_min:.2f}x lowest {tmp.iloc[-1]['label']}"
+                f"{col}: {first['label']} is {ratio:.2f}x "
+                f"lowest {last['label']} in the result"
             )
 
-        if can_share and len(tmp) > 3:
-            top3_share = tmp["value"].head(3).sum() / total * 100
-            bottom3_share = tmp["value"].tail(3).sum() / total * 100
-            lines.append(f"{col}: top three combined = {top3_share:.2f}% of total")
-            if len(tmp) > 6:
-                lines.append(f"{col}: bottom three combined = {bottom3_share:.2f}% of total")
-
-    n_rows = len(df)
-
-    def describe_counts(series) -> str:
+    def describe_counts(counts) -> str:
         return ", ".join(
-            f"{name} = {count} ({count / n_rows * 100:.2f}%)"
-            for name, count in series.items()
+            f"{name} = {count} ({count / n_rows * 100:.2f}% of returned rows)"
+            for name, count in counts.items()
         )
 
     for col in text_cols:
         distinct = df[col].nunique()
+
         if 1 < distinct <= 15 and distinct < n_rows:
             counts = df[col].value_counts()
+
             if distinct <= 8:
                 lines.append(
-                    f"{col}: {distinct} distinct values, all listed: {describe_counts(counts)}"
+                    f"{col}: {distinct} distinct values, "
+                    f"all listed: {describe_counts(counts)}"
                 )
             else:
                 lines.append(
@@ -1188,9 +1226,12 @@ def final_response_node(state: dict) -> dict:
             data_preview += "\n\nALL ROWS:\n" + df.round(2).to_string(index=False)
 
         fact_note = (
-            f"The result has {total_rows} rows. Use the pre-computed FACTS below for all "
-            "totals, shares, averages, ratios, highest/lowest items, and counts. "
-            "Never calculate, add up, or estimate numbers yourself."
+            f"The final result contains {total_rows} rows. "
+            "Statistics computed by build_facts describe only these returned rows. "
+            "For a requested percentage or contribution, use the value already "
+            "calculated by SQL or Pandas when it is present in the supplied facts "
+            "or result rows. Do not recalculate it from the displayed subset. "
+            "If the denominator is unclear, do not claim it covers all sales."
         )
 
         if total_rows == 1:
@@ -1232,6 +1273,13 @@ Grounding & Precision:
 - Refer to data in business terms (e.g., "countries", "retailers"), never "rows" or "columns", and never quote raw column names.
 - Only mention "customers" (noting they are represented by retailers) if the question itself uses the word "customer" or "customers".
 - If the question provided an assumption (such as a tax rate or cost percentage), restate it in one short sentence.
+- When a result contains a subtotal and a precomputed percentage, describe
+  them separately. Call the subtotal "combined revenue of the returned
+  retailers" or use the corresponding entity and measure. Preserve the
+  denominator used for the percentage. If its scope is unclear, report
+  the supplied percentage without attributing it to the displayed subtotal.
+- Qualify highest and lowest statements with the result scope. For a top-five
+  list, say "fifth among the top five" rather than "lowest-performing retailer."
         """
 
         human_prompt = f"""
@@ -1248,7 +1296,7 @@ Data Source:
 {data_preview}
 """
 
-        response = llm.invoke([
+        response = invoke_tracked("answer", llm, [
             SystemMessage(content=system_prompt),
             HumanMessage(content=human_prompt),
         ])

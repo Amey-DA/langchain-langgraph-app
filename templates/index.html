@@ -4,13 +4,20 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <meta name="description" content="A workspace for GoSales questions, SQL, and analysis.">
+  <meta name="description"
+        content="A workspace for GoSales questions, SQL, and analysis.">
+
   <title>GoSales Data Assistant</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+
+  <!-- Load the existing stylesheet from Flask's static folder. -->
+  <link rel="stylesheet"
+        href="{{ url_for('static', filename='css/style.css') }}">
 </head>
+
 <body>
   <div class="workspace">
 
+    <!-- Sidebar with the app name, New Chat button, and data source. -->
     <aside class="sidebar" aria-label="Workspace">
       <div class="brand">
         <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
@@ -44,15 +51,21 @@
     </aside>
 
     <main class="main">
+
+      <!-- The header also provides a New Chat button for smaller screens. -->
       <header class="topbar">
         <div class="page-name">
-          <span class="mobile-mark brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="mobile-mark brand-mark" aria-hidden="true">
+            <i></i><i></i><i></i>
+          </span>
           Data Assistant
         </div>
 
         <div class="top-actions">
           <form method="post" action="{{ url_for('new_chat') }}">
-            <button id="mobile-new-chat" type="submit" class="mobile-new">New chat</button>
+            <button id="mobile-new-chat" type="submit" class="mobile-new">
+              New chat
+            </button>
           </form>
 
           <span class="privacy-pill">
@@ -62,9 +75,11 @@
         </div>
       </header>
 
+      <!-- Flask sends the current chat's messages when rendering this page. -->
       <div id="scroll-region" class="scroll-region" aria-label="Conversation">
         <div class="content">
 
+          {# Show the welcome screen only while the chat is empty. #}
           {% if not messages %}
           <section id="welcome" class="welcome" aria-labelledby="welcome-title">
             <div class="welcome-visual" aria-hidden="true">
@@ -79,11 +94,14 @@
             {% for message in messages %}
 
               {% if message.role == "user" %}
+
+              {# Display the question exactly as the user entered it. #}
               <div class="user-turn">
                 <p class="question-bubble">{{ message.content }}</p>
               </div>
 
               {% else %}
+
               <article class="answer">
                 <span class="answer-mark" aria-hidden="true">✦</span>
 
@@ -94,10 +112,13 @@
 
                   {% if message.request_mode %}
                   <p class="metadata">
-                    {{ message.request_mode|replace('_', ' ')|capitalize }}{% if message.analysis_required %} · Analysis requested{% endif %}
+                    {{ message.request_mode|replace('_', ' ')|capitalize }}
+                    {% if message.analysis_required %} · Analysis requested{% endif %}
                   </p>
                   {% endif %}
 
+                  {# 1. Natural-language answer. Jinja outputs text here.
+                     The Markdown script at the bottom formats it for display. #}
                   <div class="assistant-response answer-copy">{{ message.content or "No response was generated." }}</div>
 
                   {% if message.error %}
@@ -106,6 +127,104 @@
 
                   <div class="inspector">
 
+                    {# 2. Final result tables. Each table has its own ID and page
+                       controls, so two tables can be browsed independently. #}
+                    {% for table in message.tables %}
+                    <details class="result-details"
+                             open
+                             data-result-table
+                             data-page-url="{{ url_for('result_page', table_id=table.id) }}"
+                             data-page-count="{{ table.page_count }}">
+
+                      {# The open attribute above makes results visible immediately. #}
+                      <summary>
+                        {{ table.title }}
+                        <span class="summary-meta">
+                          {{ "{:,}".format(table.row_count) }}
+                          {{ 'row' if table.row_count == 1 else 'rows' }}
+                        </span>
+                      </summary>
+
+                      {% if table.row_count > 0 %}
+
+                        {# The range changes when the user moves to another page. #}
+                        <p class="result-note" aria-live="polite">
+                          Showing rows
+                          <span data-range>{{ table.first_page.first_row }}–{{ table.first_page.last_row }}</span>
+                          of {{ "{:,}".format(table.row_count) }}.
+                          {% if table.can_export %}
+                            You can browse the first {{ "{:,}".format(table.browse_count) }} rows.
+                          {% endif %}
+                        </p>
+
+                        {# Flask includes the first 20 rows in the HTML.
+                           Additional pages load when the user clicks Next or Previous. #}
+                        <div class="table-scroll" tabindex="0" aria-label="{{ table.title }}">
+                          <table class="data-table">
+                            <thead>
+                              <tr>
+                                {% for column in table.columns %}
+                                <th scope="col">{{ column }}</th>
+                                {% endfor %}
+                              </tr>
+                            </thead>
+
+                            <tbody>
+                              {% for row in table.first_page.rows %}
+                              <tr>
+                                {% for value in row %}
+                                <td>{{ value }}</td>
+                                {% endfor %}
+                              </tr>
+                              {% endfor %}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {# Show the pager only when the result spans multiple pages. #}
+                        {% if table.page_count > 1 %}
+                        <nav class="result-pagination" aria-label="{{ table.title }} pages">
+
+                          <span class="result-page-label">
+                            Page <strong data-page-number>1</strong> of {{ "{:,}".format(table.page_count) }}
+                          </span>
+
+                          <button type="button" class="result-page-button" data-prev disabled>
+                            <span aria-hidden="true">‹</span>
+                            Previous
+                          </button>
+
+                          <button type="button" class="result-page-button" data-next>
+                            Next
+                            <span aria-hidden="true">›</span>
+                          </button>
+
+                        </nav>
+
+                        {# Display a message here if Flask cannot load the requested page. #}
+                        <p class="error" data-page-error role="alert" hidden></p>
+                        {% endif %}
+
+                        {# Flask enables CSV export when this final table exceeds
+                           20,000 rows. The download includes every row in that table. #}
+                        {% if table.can_export %}
+                        <div class="download-row">
+                          <a class="download-link"
+                             href="{{ url_for('result_csv', table_id=table.id) }}">
+                            Export all {{ "{:,}".format(table.row_count) }} rows (CSV)
+                          </a>
+                        </div>
+                        {% endif %}
+
+                      {% else %}
+                        <p class="result-note">No matching rows.</p>
+                      {% endif %}
+
+                    </details>
+                    {% endfor %}
+
+                    {# 3. Generated SQL appears below the tables.
+                       Omitting "open" keeps this section collapsed by default. #}
                     {% if message.sql_query %}
                     <details class="result-details">
                       <summary>Generated SQL</summary>
@@ -116,73 +235,29 @@
                     </details>
                     {% endif %}
 
-                    {% if message.columns %}
-                    <details class="result-details" {% if loop.last %}open{% endif %}>
-                      <summary>
-                        Results
-                        <span class="summary-meta">
-                          {{ message.row_count }} {{ 'row' if message.row_count == 1 else 'rows' }}
-                        </span>
-                      </summary>
-
-                      <div class="table-scroll" tabindex="0" aria-label="Result rows">
-                        <table class="data-table">
-                          <thead>
-                            <tr>
-                              {% for column in message.columns %}
-                              <th scope="col">{{ column }}</th>
-                              {% endfor %}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {% for row in message.rows %}
-                            <tr>
-                              {% for value in row %}
-                              <td>{{ value }}</td>
-                              {% endfor %}
-                            </tr>
-                            {% endfor %}
-                          </tbody>
-                        </table>
-                      </div>
-
-                      {% if message.row_count > message.rows|length %}
-                      <p class="result-note">
-                        Showing the first {{ message.rows|length }} of {{ message.row_count }} rows.
-                      </p>
-                      {% endif %}
-
-                      {% if message.downloads %}
-                      <div class="download-row">
-                        {% for d in message.downloads %}
-                        <a class="download-link" href="{{ url_for('download', file_id=d.id) }}">
-                          {{ d.label }}
-                        </a>
-                        {% endfor %}
-                      </div>
-                      {% endif %}
-                    </details>
-                    {% endif %}
-
                   </div>
                 </div>
               </article>
-              {% endif %}
 
+              {% endif %}
             {% endfor %}
 
+            <!-- This appears immediately after the user submits a question. -->
             <div id="pending" hidden role="status">
               <div class="user-turn"><p class="question-bubble"></p></div>
               <p class="pending">Working on your question…</p>
             </div>
+
           </div>
         </div>
       </div>
 
+      <!-- The question is submitted to the existing Flask home route. -->
       <footer class="composer-footer">
         <div class="composer-inner">
           <form id="composer" method="post" action="{{ url_for('home') }}">
             <label class="sr-only" for="question">Analytics question</label>
+
             <textarea
               name="question"
               id="question"
@@ -191,7 +266,10 @@
               placeholder="Ask a question about GoSales…"
               required
             ></textarea>
-            <button type="submit" class="send">Send <span aria-hidden="true">↵</span></button>
+
+            <button type="submit" class="send">
+              Send <span aria-hidden="true">↵</span>
+            </button>
           </form>
 
           <div class="composer-caption">
@@ -203,19 +281,33 @@
     </main>
   </div>
 
+  <!-- Marked converts the assistant's Markdown into HTML.
+       DOMPurify sanitizes that HTML before it is displayed. -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
+
   <script>
+    // Get the chat elements used when submitting a question.
     const form = document.getElementById("composer");
     const input = document.getElementById("question");
     const chat = document.getElementById("scroll-region");
     const pending = document.getElementById("pending");
 
+    // Enter submits the question. Shift + Enter inserts a new line.
+    // The composition check lets users finish typing with an input method.
     input.addEventListener("keydown", event => {
-      if (event.key === "Enter" && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
+      if (
+        event.key === "Enter" &&
+        !event.shiftKey &&
+        !event.isComposing &&
+        event.keyCode !== 229
+      ) {
         event.preventDefault();
         form.requestSubmit();
       }
     });
 
+    // Show the pending message and prevent duplicate submissions.
     form.addEventListener("submit", event => {
       if (!input.value.trim() || !pending.hidden) {
         event.preventDefault();
@@ -229,32 +321,126 @@
       chat.scrollTop = chat.scrollHeight;
     });
 
+    // Refresh a restored browser page so it shows the current Flask chat.
     window.addEventListener("pageshow", event => {
       if (event.persisted) location.reload();
     });
 
-    chat.scrollTop = chat.scrollHeight;
-    if (matchMedia("(pointer: fine)").matches) input.focus();
+    // Format only the assistant's answer. SQL and table values stay plain text.
+    if (window.marked && window.DOMPurify) {
+      marked.setOptions({ breaks: true, gfm: true });
 
-    // Right-align columns containing only numeric values.
-    document.querySelectorAll(".data-table").forEach(table => {
-      const rows = Array.from(table.tBodies[0].rows);
-      if (!rows.length) return;
+      document.querySelectorAll(".assistant-response").forEach(element => {
+        const markdown = element.textContent;
 
+        if (markdown.trim()) {
+          element.innerHTML = DOMPurify.sanitize(marked.parse(markdown));
+        }
+      });
+    }
+
+    // Set up each table separately. This also works for earlier chat messages.
+    document.querySelectorAll("[data-result-table]").forEach(panel => {
+      const table = panel.querySelector(".data-table");
+
+      // A zero-row result displays "No matching rows" and has no HTML table.
+      if (!table) return;
+
+      const body = table.tBodies[0];
       const headers = Array.from(table.tHead.rows[0].cells);
+      const firstPageRows = Array.from(body.rows);
+
+      // Use the existing "num" CSS class to right-align numeric columns.
+      // Keep the same alignment when displaying later pages.
       headers.forEach((header, index) => {
-        const numeric = rows.every(row => {
+        const numeric = firstPageRows.every(row => {
           const value = row.cells[index].textContent.trim().replace(/[,$₹%]/g, "");
-          return value !== "" && !Number.isNaN(Number(value));
+          return value !== "" && Number.isFinite(Number(value));
         });
 
         if (numeric) {
           header.classList.add("num");
-          rows.forEach(row => row.cells[index].classList.add("num"));
+          firstPageRows.forEach(row => row.cells[index].classList.add("num"));
         }
       });
+
+      const previous = panel.querySelector("[data-prev]");
+      const next = panel.querySelector("[data-next]");
+
+      // A single-page result has no pagination controls.
+      if (!previous || !next) return;
+
+      const range = panel.querySelector("[data-range]");
+      const pageNumber = panel.querySelector("[data-page-number]");
+      const error = panel.querySelector("[data-page-error]");
+      const pageCount = Number(panel.dataset.pageCount);
+      let currentPage = 1;
+
+      async function loadPage(targetPage) {
+        // Allow one page request at a time for this table.
+        previous.disabled = true;
+        next.disabled = true;
+        error.hidden = true;
+
+        try {
+          // Flask reads this page from the saved DataFrame.
+          // Changing pages does not run SQL, Pandas analysis, or the LLM again.
+          const url = new URL(panel.dataset.pageUrl, window.location.origin);
+          url.searchParams.set("page", targetPage);
+
+          const response = await fetch(url);
+
+          if (response.status === 404) {
+            error.textContent = "This result is no longer available. Submit the question again.";
+            error.hidden = false;
+            return;
+          }
+
+          if (!response.ok) throw new Error("Page request failed");
+
+          const data = await response.json();
+          const newRows = document.createDocumentFragment();
+
+          // Build the next page before replacing the visible rows.
+          for (const values of data.rows) {
+            const row = document.createElement("tr");
+
+            values.forEach((value, index) => {
+              const cell = row.insertCell();
+              cell.textContent = value;
+
+              if (headers[index].classList.contains("num")) {
+                cell.classList.add("num");
+              }
+            });
+
+            newRows.appendChild(row);
+          }
+
+          body.replaceChildren(newRows);
+          // Start at the first record of the newly loaded page.
+          table.closest(".table-scroll").scrollTop = 0;
+          currentPage = data.page;
+          pageNumber.textContent = currentPage.toLocaleString();
+          range.textContent =
+            `${data.first_row.toLocaleString()}–${data.last_row.toLocaleString()}`;
+
+        } catch {
+          // Keep the current page visible if a page request fails.
+          error.textContent = "Could not load this page. Please try again.";
+          error.hidden = false;
+
+        } finally {
+          previous.disabled = currentPage === 1;
+          next.disabled = currentPage === pageCount;
+        }
+      }
+
+      previous.addEventListener("click", () => loadPage(currentPage - 1));
+      next.addEventListener("click", () => loadPage(currentPage + 1));
     });
 
+    // Copy the SQL belonging to the answer whose Copy button was clicked.
     document.querySelectorAll("[data-copy]").forEach(button => {
       button.addEventListener("click", async () => {
         const code = button.parentElement.querySelector("code");
@@ -262,33 +448,27 @@
         try {
           await navigator.clipboard.writeText(code.textContent);
           button.textContent = "Copied";
+
         } catch {
+          // If clipboard access is unavailable, select the SQL for manual copying.
           const range = document.createRange();
           range.selectNodeContents(code);
+
           const selection = window.getSelection();
           selection.removeAllRanges();
           selection.addRange(range);
           button.textContent = "SQL selected";
         }
 
-        setTimeout(() => { button.textContent = "Copy"; }, 1500);
+        setTimeout(() => {
+          button.textContent = "Copy";
+        }, 1500);
       });
     });
-  </script>
 
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
-  <script>
-    if (window.marked && window.DOMPurify) {
-      marked.setOptions({ breaks: true, gfm: true });
-
-      document.querySelectorAll(".assistant-response").forEach(element => {
-        const raw = element.textContent;
-        if (raw.trim()) {
-          element.innerHTML = DOMPurify.sanitize(marked.parse(raw));
-        }
-      });
-    }
+    // Open the chat at the newest message after the answer has been formatted.
+    chat.scrollTop = chat.scrollHeight;
+    if (matchMedia("(pointer: fine)").matches) input.focus();
   </script>
 </body>
 </html>

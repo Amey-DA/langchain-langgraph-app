@@ -50,6 +50,43 @@ def validate_python(code: str) -> None:
             f"Return ONLY executable Python code with no explanation."
         )
 
+# Tell the existing planner how to describe the tables the user wants.
+# This applies across entities, measures, filters, and ranking questions.
+OUTPUT_PLAN_INSTRUCTIONS = """
+Keep the existing SQL and planning fields in your JSON response.
+Add a field named requested_tables. Its value must be a list.
+
+Each item describes one final table the user wants to see:
+- title: a short, plain-language title for the table.
+- description: what one row represents and which values it should show.
+  Include any relevant filters. For percentages, identify the comparison
+  group. For rankings, identify the measure and ranking scope.
+- ranking: null for an unranked table. For a ranked table, use an object
+  with direction ("top" or "bottom"), metric (the measure used to rank),
+  and limit (the requested number of rows, or null if unspecified).
+
+Decide the number of tables from the user's requested outputs:
+- Keep measures together when they describe the same rows and can be
+  read naturally side by side.
+- Use separate tables when the user requests independently useful
+  views, such as a complete breakdown and its shortlist, or summaries
+  with different row groupings.
+- A calculation on all records does not by itself mean the user wants
+  all records displayed. Include intermediate data only when the user
+  also asks to see it.
+- Apply these rules to any entity, measure, time period, or grouping.
+  Do not infer extra tables just because the question contains "and".
+- If the user specifies an order for the outputs, follow it. Otherwise
+  place the table that most directly answers the question first.
+
+When planning SQL, preserve the data needed for every requested table.
+Apply the user's filters. Apply a ranking limit only where it preserves
+all requested outputs and any data needed for percentage denominators.
+
+Return requested_tables inside the same JSON object as the existing
+fields. Return JSON only.
+"""
+
 def generate_sql_plan(
     question: str,
     previous_query: str = "",
@@ -164,12 +201,20 @@ If a previous attempt failed, use the supplied error to correct the plan.
         "plan_sql",
         llm,
         [
-            SystemMessage(content=system_prompt),
+            SystemMessage(content=system_prompt + "\n\n" + OUTPUT_PLAN_INSTRUCTIONS),
             HumanMessage(content=json.dumps(user_input)),
         ],
     )
 
     plan = json.loads(response.content)
+
+    # Read the table descriptions produced by this planner call.
+    requested_tables = plan.get("requested_tables", [])
+
+    if not isinstance(requested_tables, list):
+        raise ValueError("requested_tables must be a list.")
+
+    print("[REQUESTED TABLES]", json.dumps(requested_tables, indent=2))
 
     if not isinstance(plan, dict):
         raise ValueError("Return a JSON object containing the SQL plan.")
@@ -190,7 +235,7 @@ If a previous attempt failed, use the supplied error to correct the plan.
     if not isinstance(sql_query, str) or not sql_query.strip():
         raise ValueError("sql_query must be a nonempty string.")
 
-    return request_mode, analysis_required, sql_query.strip()
+    return request_mode, analysis_required, sql_query.strip(), requested_tables
 
 def execute_sql_query(query: str) -> pd.DataFrame:
     """
@@ -276,7 +321,7 @@ def sql_node(state: dict) -> dict:
         query = ""
 
         try:
-            request_mode, analysis_required, query = generate_sql_plan(
+            request_mode, analysis_required, query, requested_tables = generate_sql_plan(
                 question=question,
                 previous_query=last_query,
                 previous_error=last_error,
@@ -296,6 +341,7 @@ def sql_node(state: dict) -> dict:
                     "analysis_required": analysis_required,
                     "sql_query": "",
                     "sql_result": None,
+                    "requested_tables": [],
                     "error": f"UNSUPPORTED: {reason}",
                 }
 
@@ -309,14 +355,18 @@ def sql_node(state: dict) -> dict:
 
             # This existing function validates the SQL before executing it.
             df = execute_sql_query(query)
-
             print(f"[SQL SUCCESS] Retrieved {len(df)} rows.")
+
+            # Carry the table descriptions into LangGraph state so the
+            # Pandas step knows which outputs the user expects.
+            print(f"[SQL NODE] Passing {len(requested_tables)} requested table(s) to state.")
 
             return {
                 "request_mode": request_mode,
                 "analysis_required": analysis_required,
                 "sql_query": query,
                 "sql_result": df,
+                "requested_tables": requested_tables,
                 "error": None,
             }
 
@@ -341,6 +391,7 @@ def sql_node(state: dict) -> dict:
     return {
         "sql_query": last_query,
         "sql_result": None,
+        "requested_tables": [],
         "error": f"The SQL plan failed after 3 attempts. Last error: {last_error}",
     }
 

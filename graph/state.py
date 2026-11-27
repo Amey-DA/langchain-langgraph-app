@@ -21,6 +21,9 @@ class AgentState(TypedDict):
     analysis_result: pd.DataFrame | None
     analysis_attempts: int
 
+    # Descriptions of the final tables requested for this question.
+    requested_tables: list[dict]
+
     # Final response
     final_response: str
     error: str | None

@@ -482,3 +482,70 @@ tr:last-child td { border-bottom: 0; }
   .answer { gap: 8px; grid-template-columns: 26px minmax(0, 1fr); }
   .answer-mark { width: 26px; height: 26px; }
 }
+
+/* Place the pager directly below the table, aligned to its right edge. */
+.result-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid #e6e3f1;
+  background: #fbfaff;
+}
+
+/* Keep the page number readable without making it compete with the data. */
+.result-page-label {
+  margin-right: 4px;
+  color: #595271;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.result-page-label strong {
+  color: #372b56;
+  font-weight: 600;
+}
+
+/* Match the rounded borders and purple tones of the Results pane. */
+.result-page-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 4px 12px;
+  border: 1px solid #d8d2e8;
+  border-radius: 7px;
+  background: #fff;
+  color: #443266;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.result-page-button span {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.result-page-button:hover:not(:disabled) {
+  background: #f0ecfa;
+  border-color: #b7a8d4;
+}
+
+.result-page-button:focus-visible {
+  outline: 2px solid #7053a2;
+  outline-offset: 2px;
+}
+
+/* Previous is disabled on page 1. Next is disabled on the last page. */
+.result-page-button:disabled {
+  background: #f7f6fa;
+  color: #928d9e;
+  border-color: #e5e2eb;
+  cursor: default;
+}
